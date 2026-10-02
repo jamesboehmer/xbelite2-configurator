@@ -45,7 +45,7 @@ stage="$work/$name-$version-$goos-$goarch"
 mkdir -p "$stage" "$out"
 PKG_CONFIG_PATH="$work/pkgconfig" CGO_ENABLED=1 \
   go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$stage/$name" .
-cp README.md PROTOCOL.md "$stage/"
+cp README.md PROTOCOL.md LICENSE "$stage/"
 
 # Fail if libusb ended up dynamically linked after all.
 if [[ "$goos" == darwin ]]; then deps=$(otool -L "$stage/$name"); else deps=$(ldd "$stage/$name"); fi

@@ -114,3 +114,7 @@ These never appeared in the captures, so they aren't decoded:
 - stick curves and trigger dead zones
 
 The tool writes those bytes back unchanged.
+
+## License
+
+[MIT](LICENSE). Not affiliated with or endorsed by Microsoft. Xbox is a trademark of Microsoft.
