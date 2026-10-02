@@ -1,0 +1,11 @@
+# USB captures (may contain unrelated device traffic)
+*.pcap
+*.pcapng
+
+# build output
+/xbelite2-configurator
+/elite2
+
+# debug logs
+*.log
+*.log[0-9]*
