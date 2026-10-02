@@ -9,7 +9,13 @@ The protocol was decoded from USB captures of Xbox Accessories. See [PROTOCOL.md
 
 ## Install
 
-Download the archive for your platform from [Releases](../../releases), then extract it:
+With [Homebrew](https://brew.sh) on macOS or Linux:
+
+```sh
+brew install jamesboehmer/tap/xbelite2-configurator
+```
+
+Or download the archive for your platform from [Releases](../../releases), then extract it:
 
 | Platform | Archive |
 |---|---|
@@ -85,7 +91,9 @@ it on the controller. Canceling or quitting returns the light to the stored colo
 
 Push a semantic version tag. The [release workflow](.github/workflows/release.yml) builds
 each platform on a native runner, runs the tests, and publishes a GitHub release with the
-archives and their SHA-256 checksums. A tag with a pre-release suffix such as `v1.2.0-rc.1`
+archives and their SHA-256 checksums. For stable versions it then updates the formula in
+[jamesboehmer/homebrew-tap](https://github.com/jamesboehmer/homebrew-tap). That step needs a
+`HOMEBREW_TAP_TOKEN` secret: a fine-grained token with Contents read/write on the tap repo. A tag with a pre-release suffix such as `v1.2.0-rc.1`
 is published as a pre-release.
 
 ```sh

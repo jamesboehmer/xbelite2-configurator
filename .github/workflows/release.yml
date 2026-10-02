@@ -96,3 +96,41 @@ jobs:
             --generate-notes \
             --verify-tag \
             "${flags[@]}"
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: release
+    # Pre-releases stay out of the tap.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      # Fine-grained token with Contents: read/write on jamesboehmer/homebrew-tap.
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Check for tap token
+        if: env.TAP_TOKEN == ''
+        run: echo "::warning::HOMEBREW_TAP_TOKEN secret is not set; skipping the Homebrew tap update"
+
+      - uses: actions/checkout@v4
+        if: env.TAP_TOKEN != ''
+        with:
+          repository: jamesboehmer/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Bump formula to this release
+        if: env.TAP_TOKEN != ''
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          sha=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          formula=Formula/xbelite2-configurator.rb
+          sed -i -E "s|^  url \".*\"$|  url \"$url\"|; s|^  sha256 \".*\"$|  sha256 \"$sha\"|" "$formula"
+          if git diff --quiet; then
+            echo "Formula already points at $TAG"
+            exit 0
+          fi
+          git diff
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "xbelite2-configurator ${TAG#v}"
+          git push
