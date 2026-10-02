@@ -16,13 +16,22 @@ import (
 	"xbelite2-configurator/internal/tui"
 )
 
+// version is set at release build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	demo := flag.Bool("demo", false, "run the TUI against built-in sample data (no controller)")
 	capture := flag.String("capture", "", "with -demo, seed the profiles from a USBPcap `capture` instead")
 	decode := flag.String("decode", "", "print the decoded 0x4D config traffic in a `capture` and exit")
 	pidStr := flag.String("pid", "", "USB product id override (default: try 0x0b00, 0x0b22)")
 	debug := flag.String("debug", "", "append a log of every USB step and packet to `file`")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("xbelite2-configurator", version)
+		return
+	}
 
 	if err := run(*demo, *capture, *decode, *pidStr, *debug); err != nil {
 		fmt.Fprintln(os.Stderr, err)

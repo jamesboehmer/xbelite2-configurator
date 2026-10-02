@@ -7,6 +7,24 @@ color. Settings are stored on the controller itself, so they apply everywhere af
 
 The protocol was decoded from USB captures of Xbox Accessories. See [PROTOCOL.md](PROTOCOL.md).
 
+## Install
+
+Download the archive for your platform from [Releases](../../releases), then extract it:
+
+| Platform | Archive |
+|---|---|
+| macOS (Apple Silicon) | `xbelite2-configurator-<version>-darwin-arm64.tar.gz` |
+| Linux x64 | `xbelite2-configurator-<version>-linux-amd64.tar.gz` |
+| Linux arm64 | `xbelite2-configurator-<version>-linux-arm64.tar.gz` |
+
+libusb is built into the binaries, so there's nothing else to install. The Linux builds
+need glibc 2.35 or newer and libudev, which systemd distros have. On macOS, clear the
+download quarantine before the first run, because the binary isn't notarized:
+
+```sh
+xattr -d com.apple.quarantine xbelite2-configurator
+```
+
 ## Build
 
 Needs Go 1.22+, libusb, and a C compiler, because gousb uses cgo.
@@ -62,6 +80,20 @@ it on the controller. Canceling or quitting returns the light to the stored colo
   echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="0b00", MODE="0660", TAG+="uaccess"' \
     | sudo tee /etc/udev/rules.d/70-xbox-elite2.rules && sudo udevadm control --reload && sudo udevadm trigger
   ```
+
+## Releasing
+
+Push a semantic version tag. The [release workflow](.github/workflows/release.yml) builds
+each platform on a native runner, runs the tests, and publishes a GitHub release with the
+archives and their SHA-256 checksums. A tag with a pre-release suffix such as `v1.2.0-rc.1`
+is published as a pre-release.
+
+```sh
+git tag -s v0.1.0 -m v0.1.0 && git push origin v0.1.0
+```
+
+To build a release archive locally for the current platform, run
+`scripts/build-release.sh v0.1.0 dist`.
 
 ## Tests
 
