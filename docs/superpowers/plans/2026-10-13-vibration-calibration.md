@@ -108,7 +108,7 @@ func TestParseCalibrationReplies(t *testing.T) {
 		{"1e10010c0f00000153038b0c2303c60c", CalLeftStick, false, 0, [4]uint16{851, 3211, 803, 3270}},
 		{"1e10030c0f0010013b034d0c4502c80d", CalLeftStick, true, 0, [4]uint16{827, 3149, 581, 3528}},
 		{"1e10040c0f0000026f03460c6103f10c", CalRightStick, false, 0, [4]uint16{879, 3142, 865, 3313}},
-		{"1e10060c0f0010024e038b0c54039b0c", CalRightStick, true, 0, [4]uint16{846, 3211, 852, 2971}},
+		{"1e10060c0f0010024e038b0c54039b0c", CalRightStick, true, 0, [4]uint16{846, 3211, 852, 3227}},
 		{"1e10070d0f00000404480487055207ee0d", CalLeftTrigger, false, 4, [4]uint16{1096, 1415, 1874, 3566}},
 		{"1e10090d0f00100404bd0331058407430d", CalLeftTrigger, true, 4, [4]uint16{957, 1329, 1924, 3395}},
 		{"1e100a0d0f000008041d041f051907690d", CalRightTrigger, false, 4, [4]uint16{1053, 1311, 1817, 3433}},

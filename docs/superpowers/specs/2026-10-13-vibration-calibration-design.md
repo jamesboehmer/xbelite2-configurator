@@ -68,7 +68,7 @@ the same sequence counter as `0x4D`.
 | target | before | after |
 |---|---|---|
 | left stick | 851 3211 803 3270 | 827 3149 581 3528 |
-| right stick | 879 3142 865 3313 | 846 3211 852 2971 |
+| right stick | 879 3142 865 3313 | 846 3211 852 3227 |
 | left trigger | 04 · 1096 1415 1874 3566 | 04 · 957 1329 1924 3395 |
 | right trigger | 04 · 1053 1311 1817 3433 | 04 · 980 1340 1933 3607 |
 
