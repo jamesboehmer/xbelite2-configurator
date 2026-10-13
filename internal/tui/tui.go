@@ -209,6 +209,8 @@ type Model struct {
 	height      int
 	fwEnv       FirmwareEnv
 	fw          *fwScreen
+	cal         *calScreen
+	demo        bool
 	initCmd     tea.Cmd
 }
 
@@ -326,15 +328,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fw != nil {
 			return m.updateFirmwareMsg(msg)
 		}
+	case calReadMsg, calStartedMsg, calDoneMsg, calClosedMsg, calTickMsg:
+		if m.cal != nil {
+			return m.updateCalibrationMsg(msg)
+		}
 	case tea.KeyMsg:
 		if m.fw != nil && m.fw.stage == fwFlashing {
 			return m, nil // never leave a controller half-flashed
+		}
+		if m.cal != nil && m.cal.locked() && (msg.String() == "ctrl+c" || msg.String() == "q") {
+			return m, nil // don't leave a calibration half done
 		}
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
 		if m.fw != nil {
 			return m.updateFirmwareKey(msg)
+		}
+		if m.cal != nil {
+			return m.updateCalibrationKey(msg)
 		}
 		if m.busy {
 			return m, nil
@@ -397,6 +409,8 @@ func (m Model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.profile = int(key[0] - '0')
 	case "f":
 		return m.openFirmware()
+	case "s":
+		return m.openCalibration()
 	case "c":
 		rgb, custom := m.store.Color(m.profile)
 		m.color = newColorPicker(rgb, custom)
@@ -451,6 +465,9 @@ const help = "↑/↓ select   ←/→ change output   enter pick from list   0 
 func (m Model) View() string {
 	if m.fw != nil {
 		return m.fw.view(m.status)
+	}
+	if m.cal != nil {
+		return m.cal.view(m.store.dev.Axes(), m.demo, m.status)
 	}
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Xbox Elite Series 2 remapper") + "\n\n")
@@ -540,7 +557,7 @@ func (m Model) View() string {
 }
 
 // Run loads all profiles and starts the UI. It owns dev and closes it.
-func Run(dev device.Controller, env FirmwareEnv) error {
+func Run(dev device.Controller, env FirmwareEnv, demo bool) error {
 	store, err := NewStore(dev)
 	if err != nil {
 		dev.Close()
@@ -548,6 +565,7 @@ func Run(dev device.Controller, env FirmwareEnv) error {
 	}
 	m := New(store)
 	m.fwEnv = env
+	m.demo = demo
 	return runProgram(m)
 }
 

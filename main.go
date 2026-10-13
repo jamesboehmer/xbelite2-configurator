@@ -56,7 +56,7 @@ func run(demo bool, capture, decode, pidStr, debug string) error {
 			}
 		}
 		dev := device.NewFake(pages)
-		return tui.Run(dev, demoFirmware(dev))
+		return tui.Run(dev, demoFirmware(dev), true)
 	}
 
 	var pid gousb.ID
@@ -99,7 +99,7 @@ func run(demo bool, capture, decode, pidStr, debug string) error {
 		}
 		return err
 	}
-	return tui.Run(u, env)
+	return tui.Run(u, env, false)
 }
 
 // bootloaderLink checks whether a controller that failed the normal handshake
