@@ -17,7 +17,7 @@ import (
 const (
 	reacquireFor  = 30 * time.Second
 	reacquirePoll = 250 * time.Millisecond
-	dropFor       = 3 * time.Second
+	dropFor       = 6 * time.Second // macOS can list the old device for over 3 s after a reset
 )
 
 // FirmwareLink is a firmware.Link over USB. It skips the 0x4D handshake, so it
