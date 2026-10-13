@@ -81,6 +81,7 @@ type Detector struct {
 	kind     Kind
 	step     int
 	turns    float64 // net revolutions this step, signed
+	peak     float64 // furthest turns reached in dir since step 0 completed
 	prev     float64
 	havePrev bool
 	dir      float64 // sign of the first direction
@@ -113,7 +114,7 @@ func (d *Detector) Progress() string {
 	case d.step == 0:
 		return fmt.Sprintf("%d of %d turns", int(math.Abs(d.turns)), turnsPerStep)
 	case d.step == 1:
-		return fmt.Sprintf("%d of %d turns", int(math.Max(0, -d.turns*d.dir)), turnsPerStep)
+		return fmt.Sprintf("%d of %d turns", int(math.Max(0, (d.peak-d.turns)*d.dir)), turnsPerStep)
 	}
 	return ""
 }
@@ -127,7 +128,7 @@ func (d *Detector) Skip() {
 
 func (d *Detector) next() {
 	d.step++
-	d.turns, d.havePrev, d.pushed, d.pulls, d.down = 0, false, false, 0, false
+	d.turns, d.peak, d.havePrev, d.pushed, d.pulls, d.down = 0, 0, false, false, 0, false
 }
 
 // Feed takes one input sample and reports whether it completed a step.
@@ -161,8 +162,15 @@ func (d *Detector) feedStick(x, y float64) {
 		case d.step == 0 && math.Abs(d.turns) >= turnsPerStep:
 			d.dir = math.Copysign(1, d.turns)
 			d.next()
-		case d.step == 1 && d.turns*d.dir <= -turnsPerStep:
-			d.next()
+		case d.step == 1:
+			// Count back from the furthest point in the first direction, so the
+			// overshoot past step 0's sixth turn doesn't count against this step.
+			if d.turns*d.dir > d.peak*d.dir {
+				d.peak = d.turns
+			}
+			if (d.peak-d.turns)*d.dir >= turnsPerStep {
+				d.next()
+			}
 		}
 		return
 	}

@@ -175,3 +175,19 @@ func TestKindForTarget(t *testing.T) {
 		t.Error("0x03 accepted")
 	}
 }
+
+func TestStickOvershootDoesNotCountAgainstStepTwo(t *testing.T) {
+	d := New(LeftStick)
+	events := circle(d, LeftStick, 6.6, 1)
+	// Carry on from where the circle ended, back the other way.
+	start := 237.0 * 10
+	for i := 1; i <= 217; i++ {
+		a := (start - float64(i)*10) * math.Pi / 180
+		if d.Feed(stick(LeftStick, math.Cos(a), math.Sin(a))) {
+			events++
+		}
+	}
+	if d.Step() != 2 || events != 2 {
+		t.Fatalf("step %d, %d events; want step 2, 2 events", d.Step(), events)
+	}
+}
