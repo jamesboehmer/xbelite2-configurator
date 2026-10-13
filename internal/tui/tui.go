@@ -111,6 +111,23 @@ func (s *Store) SetColor(profile int, rgb [3]byte, custom bool) {
 	}
 }
 
+// Vibration returns a profile's motor strengths (from the standard page).
+func (s *Store) Vibration(profile int) protocol.Motors {
+	return s.Mapping(profile, protocol.Standard).Vibration()
+}
+
+// SetVibration sets the strengths on both pages of a profile, as Xbox Accessories stores them.
+func (s *Store) SetVibration(profile int, v protocol.Motors) {
+	for _, mode := range []protocol.Mode{protocol.Standard, protocol.Shift} {
+		m := s.Mapping(profile, mode)
+		before := *m
+		m.SetVibration(v)
+		if *m != before {
+			s.Dirty[profile] = true
+		}
+	}
+}
+
 // WantPreview records the color the controller should show (nil to stop previewing).
 func (s *Store) WantPreview(rgb *[3]byte) {
 	s.previewMu.Lock()
@@ -187,6 +204,7 @@ type Model struct {
 	picking     bool
 	pickSel     int
 	color       *colorPicker
+	vib         *vibPanel
 	width       int
 	height      int
 	fwEnv       FirmwareEnv
@@ -302,6 +320,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = msg.ok
 		}
+	case rumbleErrMsg:
+		m.status = "Vibration failed: " + msg.err.Error()
 	case fwOpenedMsg, fwDownloadMsg, fwImageMsg, fwLinkMsg, fwEventMsg, fwDoneMsg, fwReopenedMsg:
 		if m.fw != nil {
 			return m.updateFirmwareMsg(msg)
@@ -321,6 +341,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.color != nil {
 			return m.updateColor(msg)
+		}
+		if m.vib != nil {
+			return m.updateVibration(msg)
 		}
 		if m.picking {
 			return m.updatePicker(msg)
@@ -379,6 +402,9 @@ func (m Model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.color = newColorPicker(rgb, custom)
 		m.status = fmt.Sprintf("Picking color for profile %d (the controller previews it live)", m.profile)
 		return m, m.preview()
+	case "v":
+		m.vib = &vibPanel{}
+		m.status = fmt.Sprintf("Vibration strength for profile %d", m.profile)
 	case "tab":
 		m.mode = 1 - m.mode
 	case "d":
@@ -419,7 +445,8 @@ var (
 )
 
 const help = "↑/↓ select   ←/→ change output   enter pick from list   0 disable\n" +
-	"1/2/3 profile   tab standard/shift   c color   d reset profile   r reload   w write   f firmware   q quit"
+	"1/2/3 profile   tab standard/shift   c color   v vibration   s calibrate   d reset profile\n" +
+	"r reload   w write   f firmware   q quit"
 
 func (m Model) View() string {
 	if m.fw != nil {
@@ -492,6 +519,13 @@ func (m Model) View() string {
 			p.WriteString(l + "\n")
 		}
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, "  ", boxStyle.Render(strings.TrimRight(p.String(), "\n")))
+	} else if m.vib != nil {
+		note := ""
+		if protocol.ProfileForPage(m.store.dev.ActivePage()) != m.profile || m.store.Dirty[m.profile] {
+			note = "t tests the saved settings of the active profile"
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, "  ",
+			m.vib.view(fmt.Sprintf("Profile %d vibration", m.profile), m.store.Vibration(m.profile), note))
 	}
 	b.WriteString(body + "\n")
 
