@@ -208,3 +208,27 @@ func TestCatalogFetchRejectsPathTraversalInEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestBuiltInListIsValid(t *testing.T) {
+	if len(BuiltIn) < 3 {
+		t.Fatalf("built-in list has %d entries", len(BuiltIn))
+	}
+	var prev Version
+	for i, name := range BuiltIn {
+		v, _, ok := ParseFilename(name)
+		if !ok || name != filepath.Base(name) {
+			t.Fatalf("%q is not an official firmware name", name)
+		}
+		if i > 0 && v.Compare(prev) >= 0 {
+			t.Errorf("%s is not older than %s: the list must be newest first with no duplicates", v, prev)
+		}
+		prev = v
+	}
+}
+
+func TestParseBuiltInSkipsCommentsAndBlanks(t *testing.T) {
+	got := ParseBuiltIn("# header\n\n  DELP_a.bin  \n# note\nDELP_b.bin\n")
+	if len(got) != 2 || got[0] != "DELP_a.bin" || got[1] != "DELP_b.bin" {
+		t.Fatalf("got %q", got)
+	}
+}

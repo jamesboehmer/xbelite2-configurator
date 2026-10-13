@@ -1,0 +1,7 @@
+# Official Elite Series 2 firmware images the Microsoft manifest no longer
+# offers. The manifest names only the latest; these stay downloadable by exact
+# name, and the name carries the image's SHA-256. One per line, newest first.
+# .github/workflows/firmware-check.yml adds new ones via scripts/fwcheck.
+DELP_045E_0B00_v_5_23_6_0_h_JxWi1z5Qk2QjWtZUAC3puP7TebjR789X3GyCFqNKjtg=.bin
+DELP_045E_0B00_v_5_22_16_0_h_CKbksWMFYWRw4Z4BDIdDdOtutHrpHabfi5y0Qemv0W8=.bin
+DELP_045E_0B00_v_5_21_3242_0_h_8APxwmp_Ea7mJ3kLqvXD9wJLh7aX1HWOi3h4Lbek2KI=.bin

@@ -3,6 +3,7 @@ package firmware
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,11 +26,24 @@ const (
 	maxImageSize = 4 << 20
 )
 
-// BuiltIn lists official images the manifest no longer offers. The manifest
-// only names the latest; these stay downloadable by exact name.
-var BuiltIn = []string{
-	"DELP_045E_0B00_v_5_23_6_0_h_JxWi1z5Qk2QjWtZUAC3puP7TebjR789X3GyCFqNKjtg=.bin",
-	"DELP_045E_0B00_v_5_21_3242_0_h_8APxwmp_Ea7mJ3kLqvXD9wJLh7aX1HWOi3h4Lbek2KI=.bin",
+//go:embed builtin.txt
+var builtinTxt string
+
+// BuiltIn lists official images the manifest no longer offers, from
+// builtin.txt. The manifest only names the latest; these stay downloadable by
+// exact name.
+var BuiltIn = ParseBuiltIn(builtinTxt)
+
+// ParseBuiltIn reads the builtin.txt format: one filename per line, with
+// blank lines and #-comments ignored.
+func ParseBuiltIn(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // Catalog finds official images and downloads them into CacheDir.
