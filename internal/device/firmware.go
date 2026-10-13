@@ -110,12 +110,8 @@ func (f *FirmwareLink) Reset() error {
 			lastErr = err
 			continue
 		}
-		if oldAddr != 0 && u.dev.Desc.Bus == oldBus && u.dev.Desc.Address == oldAddr {
-			// The pre-reset instance is still listed; wait for the new one.
-			u.Close()
-			lastErr = errors.New("old device instance still present")
-			continue
-		}
+		// No same-address check here: macOS hands the re-enumerated
+		// controller the address it had before the reset.
 		f.u = u
 		for len(f.frames) > 0 {
 			<-f.frames
