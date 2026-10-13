@@ -27,6 +27,16 @@ type Controller interface {
 	// PreviewLED shows a color live without storing it; EndPreview reverts.
 	PreviewLED(rgb [3]byte) error
 	EndPreview() error
+	// Rumble runs the four motors at these levels (0-100) until called again.
+	Rumble(m protocol.Motors) error
+	ReadCalibration(target byte) (protocol.Calibration, error)
+	StartCalibration(target byte) error
+	// Init makes the controller reload its settings; Commit is what Xbox
+	// Accessories sends once calibration is finished.
+	Init() error
+	Commit() error
+	// Axes is the latest stick and trigger state.
+	Axes() protocol.Axes
 	Close()
 }
 
@@ -60,18 +70,22 @@ type USB struct {
 	timeout time.Duration
 	log     *log.Logger
 
-	mu      sync.Mutex // serializes config requests
-	seq     byte
-	sendMu  sync.Mutex // serializes endpoint writes
-	ledMu   sync.Mutex
-	ledSeq  byte // 0x0E frames have their own counter in the capture
-	replies chan protocol.Packet
-	seen    chan struct{} // closed when the first packet of any kind arrives
+	mu     sync.Mutex // serializes config requests
+	seq    byte
+	sendMu sync.Mutex // serializes endpoint writes
+	ledMu  sync.Mutex
+	ledSeq byte // 0x0E frames have their own counter in the capture
+
+	rumbleMu  sync.Mutex
+	rumbleSeq byte // 0x09 frames have their own counter in the capture
+	replies   chan protocol.Packet
+	seen      chan struct{} // closed when the first packet of any kind arrives
 
 	stateMu   sync.Mutex
 	pressed   []string
 	lastInput string
 	active    byte
+	axes      protocol.Axes
 
 	fw        chan protocol.Packet // firmware frames and their ACKs, for FirmwareLink
 	closeOnce sync.Once
@@ -284,6 +298,7 @@ func (u *USB) readLoop(ctx context.Context) {
 			p := protocol.PressedFromInput(pkt.Payload)
 			u.stateMu.Lock()
 			u.pressed = p
+			u.axes = protocol.AxesFromInput(pkt.Payload)
 			if s := fmt.Sprint(p); s != u.lastInput {
 				u.lastInput = s
 				u.log.Printf("input %s", s)
@@ -297,7 +312,7 @@ func (u *USB) readLoop(ctx context.Context) {
 					u.log.Printf("firmware frame dropped: %x", data)
 				}
 			}
-		case protocol.CmdConfig:
+		case protocol.CmdConfig, protocol.CmdCalibration:
 			select {
 			case u.replies <- pkt:
 			default:
@@ -361,6 +376,45 @@ func (u *USB) PreviewLED(rgb [3]byte) error {
 }
 
 func (u *USB) EndPreview() error { return u.sendLED(protocol.LEDPreviewEnd) }
+
+func (u *USB) Rumble(m protocol.Motors) error {
+	u.rumbleMu.Lock()
+	defer u.rumbleMu.Unlock()
+	u.rumbleSeq = u.rumbleSeq%0xFF + 1
+	return u.send(protocol.RumbleRequest(u.rumbleSeq, m))
+}
+
+func (u *USB) ReadCalibration(target byte) (protocol.Calibration, error) {
+	reply, err := u.config(func(s byte) []byte { return protocol.CalibrationRead(s, target) })
+	if err != nil {
+		return protocol.Calibration{}, err
+	}
+	return protocol.ParseCalibration(reply.Payload)
+}
+
+func (u *USB) StartCalibration(target byte) error {
+	reply, err := u.config(func(s byte) []byte { return protocol.CalibrationStart(s, target) })
+	if err != nil {
+		return err
+	}
+	if len(reply.Payload) < 2 || reply.Payload[1] != 0x00 {
+		return fmt.Errorf("controller refused to start calibration (%x)", reply.Payload)
+	}
+	return nil
+}
+
+func (u *USB) Init() error {
+	_, err := u.config(protocol.InitRequest)
+	return err
+}
+
+func (u *USB) Commit() error { return u.refreshActive() }
+
+func (u *USB) Axes() protocol.Axes {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	return u.axes
+}
 
 func (u *USB) ActivePage() byte {
 	u.stateMu.Lock()
@@ -455,10 +509,29 @@ type Fake struct {
 	Writes   [][2][]byte // (page, data) in write order
 	Previews [][3]byte
 	Ended    int
+
+	mu        sync.Mutex
+	Rumbles   []protocol.Motors
+	Cal       map[byte]protocol.Calibration
+	CalStarts []byte
+	Inits     int
+	Commits   int
+	CalErr    error // returned by ReadCalibration and StartCalibration when set
+	axes      protocol.Axes
+}
+
+// defaultCalibration is what the controller in the capture reported before calibrating.
+func defaultCalibration() map[byte]protocol.Calibration {
+	return map[byte]protocol.Calibration{
+		protocol.CalLeftStick:    {Target: protocol.CalLeftStick, Values: [4]uint16{851, 3211, 803, 3270}},
+		protocol.CalRightStick:   {Target: protocol.CalRightStick, Values: [4]uint16{879, 3142, 865, 3313}},
+		protocol.CalLeftTrigger:  {Target: protocol.CalLeftTrigger, Extra: 4, Values: [4]uint16{1096, 1415, 1874, 3566}},
+		protocol.CalRightTrigger: {Target: protocol.CalRightTrigger, Extra: 4, Values: [4]uint16{1053, 1311, 1817, 3433}},
+	}
 }
 
 func NewFake(pages map[byte][]byte) *Fake {
-	f := &Fake{Pages: map[byte][]byte{}}
+	f := &Fake{Pages: map[byte][]byte{}, Cal: defaultCalibration()}
 	for k, v := range pages {
 		f.Pages[k] = append([]byte(nil), v...)
 	}
@@ -487,4 +560,63 @@ func (f *Fake) WriteProfile(profile int, pages map[byte][]byte) error {
 		f.Pages[page] = d
 	}
 	return nil
+}
+
+func (f *Fake) Rumble(m protocol.Motors) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Rumbles = append(f.Rumbles, m)
+	return nil
+}
+
+func (f *Fake) ReadCalibration(target byte) (protocol.Calibration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.CalErr != nil {
+		return protocol.Calibration{}, f.CalErr
+	}
+	c, ok := f.Cal[target]
+	if !ok {
+		return protocol.Calibration{}, fmt.Errorf("no calibration target 0x%02x", target)
+	}
+	return c, nil
+}
+
+// StartCalibration pretends the user widened the range a little.
+func (f *Fake) StartCalibration(target byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.CalErr != nil {
+		return f.CalErr
+	}
+	c, ok := f.Cal[target]
+	if !ok {
+		return fmt.Errorf("no calibration target 0x%02x", target)
+	}
+	f.CalStarts = append(f.CalStarts, target)
+	c.Calibrated = true
+	for i := range c.Values {
+		if i%2 == 0 {
+			c.Values[i] -= 10
+		} else {
+			c.Values[i] += 10
+		}
+	}
+	f.Cal[target] = c
+	return nil
+}
+
+func (f *Fake) Init() error   { f.mu.Lock(); f.Inits++; f.mu.Unlock(); return nil }
+func (f *Fake) Commit() error { f.mu.Lock(); f.Commits++; f.mu.Unlock(); return nil }
+
+func (f *Fake) Axes() protocol.Axes {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.axes
+}
+
+func (f *Fake) SetAxes(a protocol.Axes) {
+	f.mu.Lock()
+	f.axes = a
+	f.mu.Unlock()
 }
