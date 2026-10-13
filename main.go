@@ -79,6 +79,5 @@ func run(demo bool, capture, decode, pidStr, debug string) error {
 		}
 		dev = u
 	}
-	defer dev.Close()
-	return tui.Run(dev)
+	return tui.Run(dev, tui.FirmwareEnv{})
 }
