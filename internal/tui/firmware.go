@@ -355,7 +355,11 @@ func (m Model) updateFirmwareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.startFlash(true)
 			}
 		case "esc":
-			if !f.recovery {
+			switch {
+			case f.recovery:
+			case f.failed == failFlash && f.ev.Pass > 0:
+				return m.enterRecovery()
+			default:
 				return m.leaveFirmware()
 			}
 		case "q":
@@ -364,6 +368,21 @@ func (m Model) updateFirmwareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	return m, nil
+}
+
+// enterRecovery is where esc goes after a flash fails inside a pass: the
+// controller is in its bootloader, so a normal reconnect can't work. The link
+// is dropped so the next flash opens a fresh one.
+func (m Model) enterRecovery() (tea.Model, tea.Cmd) {
+	f := m.fw
+	if f.link != nil {
+		f.link.Close()
+		f.link = nil
+	}
+	f.recovery, f.known, f.img = true, false, nil
+	f.stage, f.errMsg = fwList, ""
+	m.status = ""
 	return m, nil
 }
 
@@ -501,8 +520,11 @@ func (f *fwScreen) help() string {
 		if f.failed != failFlash || f.img != nil {
 			retry = "r retry   "
 		}
-		if f.recovery {
+		switch {
+		case f.recovery:
 			return retry + "q quit"
+		case f.failed == failFlash && f.ev.Pass > 0:
+			return retry + "esc choose firmware"
 		}
 		return retry + "esc back"
 	}

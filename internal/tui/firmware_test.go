@@ -322,3 +322,39 @@ func TestFirmwareConfirmUnknownInstalled(t *testing.T) {
 		t.Errorf("view:\n%s", v)
 	}
 }
+
+// After a failure inside a pass the controller is in its bootloader, where a
+// normal reconnect can't work, so esc switches to recovery instead.
+func TestFirmwareEscAfterMidPassFailureEntersRecovery(t *testing.T) {
+	env, bl := fwEnv(t)
+	reopens := 0
+	reopen := env.Reopen
+	env.Reopen = func(l firmware.Link) (device.Controller, error) { reopens++; return reopen(l) }
+	bl.FailWrite = 10
+	m := fwPress(t, newFwModel(t, env), "f", "enter", "y", "esc")
+	if reopens != 0 {
+		t.Fatalf("esc tried a normal reconnect %d times", reopens)
+	}
+	if m.fw == nil || m.fw.stage != fwList || !m.fw.recovery {
+		t.Fatalf("esc didn't enter recovery: %+v", m.fw)
+	}
+	if v := m.View(); !strings.Contains(v, "firmware-update mode") {
+		t.Fatalf("view:\n%s", v)
+	}
+	bl.FailWrite = 0
+	m = fwPress(t, m, "enter", "y")
+	if m.fw != nil || reopens != 1 {
+		t.Fatalf("recovery flash didn't finish (reopens %d): %+v", reopens, m.fw)
+	}
+}
+
+// Before any pass the controller is still in normal mode, so esc reconnects.
+func TestFirmwareEscBeforeAnyPassReconnects(t *testing.T) {
+	env, bl := fwEnv(t)
+	link := &infoFailLink{FakeBootloader: bl}
+	env.OpenLink = func() (firmware.Link, error) { return link, nil }
+	m := fwPress(t, newFwModel(t, env), "f", "enter", "y", "esc")
+	if m.fw != nil {
+		t.Fatalf("esc didn't return to the main screen: %+v", m.fw)
+	}
+}
