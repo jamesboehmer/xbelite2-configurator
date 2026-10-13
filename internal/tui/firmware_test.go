@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,5 +175,66 @@ func TestRecoveryStartsOnFirmwareScreen(t *testing.T) {
 	m = fwPress(t, m, "enter", "y")
 	if m.fw != nil || m.store == nil {
 		t.Fatalf("recovery didn't finish: %+v", m.fw)
+	}
+}
+
+// infoFailLink fails the first op 00 request, as a timeout in the preamble would.
+type infoFailLink struct {
+	*firmware.FakeBootloader
+	failed bool
+}
+
+func (l *infoFailLink) Send(frame []byte) error {
+	if !l.failed && len(frame) > 4 && frame[0] == firmware.CmdFirmware && frame[1]&0x80 == 0 && frame[4] == firmware.OpInfo {
+		l.failed = true
+		l.FakeBootloader.Sent = append(l.FakeBootloader.Sent, frame)
+		return errors.New("injected info failure")
+	}
+	return l.FakeBootloader.Send(frame)
+}
+
+func countInfo(bl *firmware.FakeBootloader) int {
+	n := 0
+	for _, s := range bl.Sent {
+		if len(s) > 4 && s[0] == firmware.CmdFirmware && s[1]&0x80 == 0 && s[4] == firmware.OpInfo {
+			n++
+		}
+	}
+	return n
+}
+
+func TestFirmwareRetryBeforeAnyPassRechecksDevice(t *testing.T) {
+	env, bl := fwEnv(t)
+	link := &infoFailLink{FakeBootloader: bl}
+	env.OpenLink = func() (firmware.Link, error) { return link, nil }
+	m := fwPress(t, newFwModel(t, env), "f", "enter", "y")
+	if m.fw == nil || m.fw.stage != fwFailed || m.fw.ev.Pass != 0 {
+		t.Fatalf("expected failure before any pass: %+v", m.fw)
+	}
+	before := countInfo(bl)
+	m = fwPress(t, m, "r")
+	if m.fw != nil {
+		t.Fatalf("retry didn't finish: %s", m.fw.errMsg)
+	}
+	if countInfo(bl) <= before {
+		t.Error("retry skipped the device identity check (no op 00)")
+	}
+}
+
+func TestFirmwareMidPassRetrySkipsPreamble(t *testing.T) {
+	env, bl := fwEnv(t)
+	bl.FailWrite = 10
+	m := fwPress(t, newFwModel(t, env), "f", "enter", "y")
+	if m.fw == nil || m.fw.stage != fwFailed || m.fw.ev.Pass == 0 {
+		t.Fatalf("expected a mid-pass failure: %+v", m.fw)
+	}
+	before := countInfo(bl)
+	bl.FailWrite = 0
+	m = fwPress(t, m, "r")
+	if m.fw != nil {
+		t.Fatalf("retry didn't finish: %s", m.fw.errMsg)
+	}
+	if countInfo(bl) != before {
+		t.Error("mid-pass retry sent op 00")
 	}
 }

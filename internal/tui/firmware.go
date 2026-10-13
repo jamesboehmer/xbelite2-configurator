@@ -192,11 +192,13 @@ func (m Model) loadLocal(path string) tea.Cmd {
 // since a failed reset leaves the old one disconnected.
 func (m Model) startFlash(retry bool) (tea.Model, tea.Cmd) {
 	f := m.fw
+	// Only skip the device identity check when the failed run got past it.
+	fromBoot := f.recovery || (retry && f.ev.Pass > 0)
 	f.stage, f.ev, f.errMsg = fwFlashing, firmware.Event{}, ""
 	ch := make(chan tea.Msg, 64)
 	f.events = ch
 	env, link, img := m.fwEnv, f.link, f.img
-	opts := firmware.Options{FromBootloader: retry || f.recovery}
+	opts := firmware.Options{FromBootloader: fromBoot}
 	go func() {
 		if retry || link == nil {
 			if link != nil {
@@ -450,10 +452,14 @@ func (f *fwScreen) help() string {
 	case fwConfirm:
 		return "y flash   n cancel"
 	case fwFailed:
-		if f.recovery {
-			return "r retry   q quit"
+		retry := ""
+		if f.img != nil {
+			retry = "r retry   "
 		}
-		return "r retry   esc back"
+		if f.recovery {
+			return retry + "q quit"
+		}
+		return retry + "esc back"
 	}
 	return ""
 }
