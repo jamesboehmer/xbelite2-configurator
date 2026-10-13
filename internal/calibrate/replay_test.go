@@ -16,7 +16,13 @@ import (
 // Xbox Accessories gave a soft buzz (all motors 0x0a) after each step it saw
 // completed. Feeding the same input reports through the detector must produce
 // one step event per buzz, none more than half a second after it.
-func TestReplayMatchesXboxAccessories(t *testing.T) {
+func TestReplayMatchesXboxAccessories(t *testing.T) { replay(t, 0) }
+
+// The app samples input every 20 ms, so feed only reports at least that far
+// apart (by capture time) and expect the same result.
+func TestReplayMatchesXboxAccessoriesSampled(t *testing.T) { replay(t, 0.020) }
+
+func replay(t *testing.T, minGap float64) {
 	path := os.Getenv("XBE2_CAL_CAPTURE")
 	if path == "" {
 		t.Skip("set XBE2_CAL_CAPTURE to the calibration capture to run")
@@ -57,6 +63,7 @@ func TestReplayMatchesXboxAccessories(t *testing.T) {
 	for _, w := range wins {
 		det := New(w.kind)
 		var events []float64
+		last := -1e9
 		for _, tr := range ts {
 			if tr.FromHost || tr.Time < w.start || tr.Time > w.end || len(tr.Data) < 4 || tr.Data[0] != protocol.CmdInput {
 				continue
@@ -65,6 +72,10 @@ func TestReplayMatchesXboxAccessories(t *testing.T) {
 			if err != nil {
 				continue
 			}
+			if tr.Time-last < minGap {
+				continue
+			}
+			last = tr.Time
 			if det.Feed(protocol.AxesFromInput(p.Payload)) {
 				events = append(events, tr.Time)
 			}

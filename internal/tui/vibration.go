@@ -74,6 +74,9 @@ func (m Model) updateVibration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, rumble(m.store.dev, testLevel, testLength)
 	case "esc", "enter", "v":
 		m.vib = nil
+	case "w":
+		m.vib = nil
+		return m.updateMain(msg)
 	}
 	return m, nil
 }

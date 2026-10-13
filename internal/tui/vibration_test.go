@@ -80,3 +80,11 @@ func TestVibrationNoteForInactiveProfile(t *testing.T) {
 		t.Fatalf("missing note:\n%s", m.View())
 	}
 }
+
+func TestVibrationPanelWriteKey(t *testing.T) {
+	m, dev := vibModel(t)
+	m = fwPress(t, m, "v", "left", "w")
+	if m.vib != nil || len(dev.Writes) == 0 {
+		t.Fatalf("panel %v, writes %d", m.vib, len(dev.Writes))
+	}
+}

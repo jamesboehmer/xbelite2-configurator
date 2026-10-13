@@ -42,6 +42,7 @@ type calScreen struct {
 	restFor     time.Duration
 	before      protocol.Calibration
 	after       protocol.Calibration
+	afterOK     bool
 	cancelled   bool
 	ran         bool
 	gen         int
@@ -57,6 +58,7 @@ type calReadMsg struct {
 type calStartedMsg struct{ err error }
 type calDoneMsg struct {
 	after     protocol.Calibration
+	readOK    bool
 	cancelled bool
 	err       error
 }
@@ -78,7 +80,7 @@ func (c *calScreen) locked() bool {
 	switch c.stage {
 	case calRunning, calRestEnd, calConfirm, calBusy:
 		return true
-	case calMenu, calResult:
+	case calMenu, calRestStart, calResult:
 		return c.ran // the final COMMIT is still owed
 	}
 	return false
@@ -113,14 +115,15 @@ func finishCalibration(dev device.Controller, target byte, cancelled bool) tea.C
 		off := func() { dev.Rumble(protocol.Motors{}) }
 		if !cancelled {
 			on()
+			time.Sleep(buzzFor)
+			off()
 		}
-		after, err := dev.ReadCalibration(target)
+		after, rerr := dev.ReadCalibration(target)
+		err := rerr
 		if ierr := dev.Init(); err == nil { // INIT even if the read failed
 			err = ierr
 		}
 		if !cancelled {
-			time.Sleep(buzzFor)
-			off()
 			for i := 0; i < 2; i++ {
 				time.Sleep(buzzGap)
 				on()
@@ -128,7 +131,7 @@ func finishCalibration(dev device.Controller, target byte, cancelled bool) tea.C
 				off()
 			}
 		}
-		return calDoneMsg{after: after, cancelled: cancelled, err: err}
+		return calDoneMsg{after: after, readOK: rerr == nil, cancelled: cancelled, err: err}
 	}
 }
 
@@ -149,16 +152,18 @@ func (m Model) updateCalibrationMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.calTickUpdate()
 	case calStartedMsg:
 		if msg.err != nil {
-			c.stage, c.err = calMenu, "Couldn't start calibration: "+msg.err.Error()
+			// the start frame may have taken effect, so COMMIT is owed on leaving
+			c.stage, c.ran, c.err = calMenu, true, "Couldn't start calibration: "+msg.err.Error()
 			return m, nil
 		}
 		c.stage = calRunning
 		return m, c.newTicks()
 	case calDoneMsg:
-		c.stage, c.ran, c.after, c.cancelled = calResult, true, msg.after, msg.cancelled
+		c.stage, c.ran, c.after, c.afterOK, c.cancelled = calResult, true, msg.after, msg.readOK, msg.cancelled
 		if msg.err != nil {
 			c.err = msg.err.Error()
-		} else {
+		}
+		if msg.readOK {
 			c.cals[c.sel] = msg.after
 		}
 	case calClosedMsg:
@@ -180,7 +185,14 @@ func (m Model) calTickUpdate() (tea.Model, tea.Cmd) {
 		if c.rest.Feed(time.Now(), a) {
 			c.stage, c.busyMsg = calBusy, "Starting calibration..."
 			dev, target := m.store.dev, c.det.Kind().Target()
-			return m, func() tea.Msg { return calStartedMsg{dev.StartCalibration(target)} }
+			return m, func() tea.Msg {
+				err := dev.StartCalibration(target)
+				if err != nil { // it may have started anyway: leave the controller as the app would
+					dev.ReadCalibration(target)
+					dev.Init()
+				}
+				return calStartedMsg{err}
+			}
 		}
 	case calRunning:
 		var buzz tea.Cmd
@@ -256,6 +268,7 @@ func (m Model) updateCalibrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "n", "esc":
 			c.stage = c.confirmFrom
 			c.rest = calibrate.NewRest(c.det.Kind(), c.restFor) // time in the dialog wasn't observed
+			c.det.Resume()
 			return m, c.newTicks()
 		}
 	case calResult:
@@ -366,7 +379,11 @@ func (c *calScreen) view(a protocol.Axes, demo bool, status string) string {
 		kind := calibrate.Kinds[c.sel]
 		b.WriteString(" " + boldStyle.Render(kind.String()) + "\n\n")
 		b.WriteString(" Before: " + calValues(kind, c.before) + "\n")
-		b.WriteString(" After:  " + calValues(kind, c.after) + "\n")
+		if c.afterOK {
+			b.WriteString(" After:  " + calValues(kind, c.after) + "\n")
+		} else {
+			b.WriteString(" After: unknown\n")
+		}
 		if c.err != "" {
 			b.WriteString("\n " + boldStyle.Render("Error: "+c.err) + "\n")
 		}

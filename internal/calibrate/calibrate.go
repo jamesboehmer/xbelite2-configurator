@@ -85,6 +85,7 @@ type Detector struct {
 	prev     float64
 	havePrev bool
 	dir      float64 // sign of the first direction
+	armed    bool    // the stick has come back to centre since the last step
 	pushed   bool
 	pulls    int
 	down     bool
@@ -119,6 +120,10 @@ func (d *Detector) Progress() string {
 	return ""
 }
 
+// Resume forgets the last angle, so a gap in the input (a dialog, say) doesn't
+// count as a turn. Step, turns and peak are kept.
+func (d *Detector) Resume() { d.havePrev = false }
+
 // Skip completes the current step (demo mode).
 func (d *Detector) Skip() {
 	if !d.Done() {
@@ -129,6 +134,9 @@ func (d *Detector) Skip() {
 func (d *Detector) next() {
 	d.step++
 	d.turns, d.peak, d.havePrev, d.pushed, d.pulls, d.down = 0, 0, false, false, 0, false
+	// A push step ends at centre; the first one follows turns on the rim and
+	// must wait for the stick to come back, or overshoot would count as a push.
+	d.armed = d.step >= 3
 }
 
 // Feed takes one input sample and reports whether it completed a step.
@@ -175,7 +183,10 @@ func (d *Detector) feedStick(x, y float64) {
 		return
 	}
 	dir := pushDirs[d.step-2]
-	if x*dir[0]+y*dir[1] >= pushFrac {
+	if r <= centerFrac {
+		d.armed = true
+	}
+	if d.armed && x*dir[0]+y*dir[1] >= pushFrac {
 		d.pushed = true
 	}
 	if d.pushed && r <= centerFrac {

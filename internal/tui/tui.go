@@ -587,6 +587,7 @@ func runProgram(m Model) error {
 				err = fmt.Errorf("could not end LED preview: %w", perr)
 			}
 		}
+		fm.store.dev.Rumble(protocol.Motors{}) // a quit mid-buzz mustn't leave the motors running
 		fm.store.dev.Close()
 	}
 	return err

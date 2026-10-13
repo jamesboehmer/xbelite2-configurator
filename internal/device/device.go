@@ -516,8 +516,10 @@ type Fake struct {
 	CalStarts []byte
 	Inits     int
 	Commits   int
-	CalErr    error // returned by ReadCalibration and StartCalibration when set
-	ReadErr   error // returned by ReadCalibration only
+	CalErr    error    // returned by ReadCalibration and StartCalibration when set
+	ReadErr   error    // returned by ReadCalibration only
+	StartErr  error    // returned by StartCalibration only
+	Calls     []string // rumble-on, rumble-off, read, init, in call order
 	axes      protocol.Axes
 }
 
@@ -567,12 +569,18 @@ func (f *Fake) Rumble(m protocol.Motors) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Rumbles = append(f.Rumbles, m)
+	if m == (protocol.Motors{}) {
+		f.Calls = append(f.Calls, "rumble-off")
+	} else {
+		f.Calls = append(f.Calls, "rumble-on")
+	}
 	return nil
 }
 
 func (f *Fake) ReadCalibration(target byte) (protocol.Calibration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, "read")
 	if f.ReadErr != nil {
 		return protocol.Calibration{}, f.ReadErr
 	}
@@ -593,6 +601,9 @@ func (f *Fake) StartCalibration(target byte) error {
 	if f.CalErr != nil {
 		return f.CalErr
 	}
+	if f.StartErr != nil {
+		return f.StartErr
+	}
 	c, ok := f.Cal[target]
 	if !ok {
 		return fmt.Errorf("no calibration target 0x%02x", target)
@@ -610,7 +621,14 @@ func (f *Fake) StartCalibration(target byte) error {
 	return nil
 }
 
-func (f *Fake) Init() error   { f.mu.Lock(); f.Inits++; f.mu.Unlock(); return nil }
+func (f *Fake) Init() error {
+	f.mu.Lock()
+	f.Inits++
+	f.Calls = append(f.Calls, "init")
+	f.mu.Unlock()
+	return nil
+}
+
 func (f *Fake) Commit() error { f.mu.Lock(); f.Commits++; f.mu.Unlock(); return nil }
 
 func (f *Fake) Axes() protocol.Axes {

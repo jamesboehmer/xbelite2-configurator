@@ -191,3 +191,34 @@ func TestStickOvershootDoesNotCountAgainstStepTwo(t *testing.T) {
 		t.Fatalf("step %d, %d events; want step 2, 2 events", d.Step(), events)
 	}
 }
+
+func TestStickOvershootThroughTheTopDoesNotCompletePushUp(t *testing.T) {
+	d := New(RightStick)
+	circle(d, RightStick, 6.2, 1)
+	circle(d, RightStick, -6.2, 1) // step 1 completes, still on the rim
+	if d.Step() != 2 {
+		t.Fatalf("step %d, want 2", d.Step())
+	}
+	for deg := -80.0; deg >= -300; deg -= 10 { // on through the top
+		a := deg * math.Pi / 180
+		d.Feed(stick(RightStick, math.Cos(a), math.Sin(a)))
+	}
+	d.Feed(stick(RightStick, 0, 0))
+	if d.Step() != 2 {
+		t.Fatalf("overshoot completed push up: step %d", d.Step())
+	}
+	if n := push(d, RightStick, 0, 1); n != 1 || d.Step() != 3 {
+		t.Fatalf("real push: %d events, step %d", n, d.Step())
+	}
+}
+
+func TestResumeClearsTurnContinuity(t *testing.T) {
+	d := New(LeftStick)
+	circle(d, LeftStick, 2.5, 1)
+	step, turns := d.Step(), d.turns
+	d.Resume()
+	d.Feed(stick(LeftStick, -1, 0)) // opposite side: no delta against the old angle
+	if d.Step() != step || d.turns != turns {
+		t.Fatalf("step %d turns %v, want %d %v", d.Step(), d.turns, step, turns)
+	}
+}

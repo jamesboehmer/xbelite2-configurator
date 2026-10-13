@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -215,5 +216,67 @@ func TestCalibrationResumeFromConfirmGetsFreshRest(t *testing.T) {
 	m = fwPress(t, m, "esc", "n")
 	if m.cal.stage != calRestEnd || m.cal.rest == old {
 		t.Fatalf("stage %d, rest reused %v", m.cal.stage, m.cal.rest == old)
+	}
+}
+
+func TestCalibrationFinishOrderMatchesCapture(t *testing.T) {
+	m, dev := calModel(t)
+	finishDemo(t, m)
+	want := []string{"rumble-on", "rumble-off", "read", "init", "rumble-on", "rumble-off", "rumble-on", "rumble-off"}
+	var got []string
+	for _, c := range dev.Calls {
+		if c != "rumble-on" && c != "rumble-off" && c != "read" && c != "init" {
+			continue
+		}
+		got = append(got, c)
+	}
+	// drop the soft buzzes (6 on/off pairs) and the menu reads before the finish
+	if len(got) < len(want) || !slices.Equal(got[len(got)-len(want):], want) {
+		t.Fatalf("calls %v, want tail %v", got, want)
+	}
+}
+
+func TestCalibrationQuitBlockedAtRestStartAfterCalibrating(t *testing.T) {
+	m, _ := calModel(t)
+	m = finishDemo(t, m)
+	m = fwPress(t, m, "enter", "down", "enter") // menu, next target
+	if m.cal.stage != calRestStart {
+		t.Fatalf("stage %d", m.cal.stage)
+	}
+	if _, cmd := m.Update(fwKey("ctrl+c")); cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Error("ctrl+c quit without the owed COMMIT")
+		}
+	}
+	m = fwPress(t, m, "esc")
+	if m.cal.stage != calMenu {
+		t.Fatalf("esc: stage %d", m.cal.stage)
+	}
+}
+
+func TestCalibrationStartErrorStillReadsInitsAndCommits(t *testing.T) {
+	m, dev := calModel(t)
+	m = openCal(t, m)
+	dev.StartErr = errors.New("reply lost")
+	m = tickCal(t, fwPress(t, m, "enter"))
+	if m.cal.stage != calMenu || dev.Inits != 1 || !strings.Contains(m.View(), "reply lost") {
+		t.Fatalf("stage %d inits %d:\n%s", m.cal.stage, dev.Inits, m.View())
+	}
+	m = fwPress(t, m, "esc")
+	if m.cal != nil || dev.Commits != 1 {
+		t.Fatalf("cal %+v commits %d", m.cal, dev.Commits)
+	}
+}
+
+func TestCalibrationFailedFinalReadShowsUnknown(t *testing.T) {
+	m, dev := calModel(t)
+	m = tickCal(t, fwPress(t, openCal(t, m), "enter"))
+	dev.ReadErr = errors.New("read failed")
+	for i := 0; i < 6; i++ {
+		m = fwPress(t, m, "n")
+	}
+	m = tickCal(t, m)
+	if v := m.View(); !strings.Contains(v, "After: unknown") || strings.Contains(v, "0–0") {
+		t.Fatalf("view:\n%s", v)
 	}
 }
