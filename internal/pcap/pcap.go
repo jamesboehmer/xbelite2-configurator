@@ -1,4 +1,4 @@
-// Package pcap reads USBPcap pcapng captures (no tshark needed) and decodes
+// Package pcap reads USBPcap captures (pcapng or classic pcap, no tshark needed) and decodes
 // the Elite Series 2 config traffic in them.
 package pcap
 
@@ -26,6 +26,7 @@ const (
 type Transfer struct {
 	Time     float64 // seconds since first packet
 	FromHost bool
+	Device   uint16 // USB device address; changes when the controller re-enumerates
 	Data     []byte
 }
 
@@ -34,6 +35,13 @@ func Read(path string) ([]Transfer, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if len(raw) >= 24 {
+		for _, order := range []binary.ByteOrder{binary.LittleEndian, binary.BigEndian} {
+			if m := order.Uint32(raw); m == 0xa1b2c3d4 || m == 0xa1b23c4d {
+				return readClassic(path, raw, order)
+			}
+		}
 	}
 	var (
 		order     binary.ByteOrder = binary.LittleEndian
@@ -84,6 +92,39 @@ func Read(path string) ([]Transfer, error) {
 	return out, nil
 }
 
+// readClassic reads a libpcap file: a 24-byte header, then records of
+// ts_sec, ts_frac, incl_len, orig_len and the packet.
+func readClassic(path string, raw []byte, order binary.ByteOrder) ([]Transfer, error) {
+	res := 1e-6
+	if order.Uint32(raw) == 0xa1b23c4d {
+		res = 1e-9
+	}
+	if order.Uint32(raw[20:])&0x0fffffff != linkTypeUSBPcap {
+		return nil, fmt.Errorf("%s is not a USBPcap capture", path)
+	}
+	var out []Transfer
+	first := -1.0
+	for off := 24; off+16 <= len(raw); {
+		ts := float64(order.Uint32(raw[off:])) + float64(order.Uint32(raw[off+4:]))*res
+		n := int(order.Uint32(raw[off+8:]))
+		if off+16+n > len(raw) {
+			return nil, fmt.Errorf("%s: corrupt record at offset %d", path, off)
+		}
+		if first < 0 {
+			first = ts
+		}
+		if t, ok := parseUSBPcap(raw[off+16 : off+16+n]); ok {
+			t.Time = ts - first
+			out = append(out, t)
+		}
+		off += 16 + n
+	}
+	if out == nil {
+		return nil, errors.New("no USBPcap interrupt/bulk data found in " + path)
+	}
+	return out, nil
+}
+
 // ifTsResol reads the if_tsresol option (default microseconds).
 func ifTsResol(opts []byte, order binary.ByteOrder) float64 {
 	for len(opts) >= 4 {
@@ -118,7 +159,7 @@ func parseUSBPcap(pkt []byte) (Transfer, bool) {
 	if (pkt[22] != transferIntr && pkt[22] != transferBulk) || hdrLen > len(pkt) || hdrLen == len(pkt) {
 		return Transfer{}, false
 	}
-	return Transfer{FromHost: pkt[16]&1 == 0, Data: pkt[hdrLen:]}, true
+	return Transfer{FromHost: pkt[16]&1 == 0, Device: binary.LittleEndian.Uint16(pkt[19:]), Data: pkt[hdrLen:]}, true
 }
 
 var opNames = map[byte]string{
