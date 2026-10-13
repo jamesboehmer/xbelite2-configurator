@@ -336,7 +336,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fw != nil && m.fw.stage == fwFlashing {
 			return m, nil // never leave a controller half-flashed
 		}
-		if m.cal != nil && m.cal.locked() && (msg.String() == "ctrl+c" || msg.String() == "q") {
+		if m.cal != nil && m.cal.locked() && (msg.String() == "ctrl+c" || (msg.String() == "q" && m.cal.stage != calMenu)) {
 			return m, nil // don't leave a calibration half done
 		}
 		if msg.String() == "ctrl+c" {

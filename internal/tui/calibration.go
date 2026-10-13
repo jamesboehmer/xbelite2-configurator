@@ -78,6 +78,8 @@ func (c *calScreen) locked() bool {
 	switch c.stage {
 	case calRunning, calRestEnd, calConfirm, calBusy:
 		return true
+	case calMenu, calResult:
+		return c.ran // the final COMMIT is still owed
 	}
 	return false
 }
@@ -113,8 +115,8 @@ func finishCalibration(dev device.Controller, target byte, cancelled bool) tea.C
 			on()
 		}
 		after, err := dev.ReadCalibration(target)
-		if err == nil {
-			err = dev.Init()
+		if ierr := dev.Init(); err == nil { // INIT even if the read failed
+			err = ierr
 		}
 		if !cancelled {
 			time.Sleep(buzzFor)
@@ -253,6 +255,7 @@ func (m Model) updateCalibrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, finishCalibration(m.store.dev, c.det.Kind().Target(), true)
 		case "n", "esc":
 			c.stage = c.confirmFrom
+			c.rest = calibrate.NewRest(c.det.Kind(), c.restFor) // time in the dialog wasn't observed
 			return m, c.newTicks()
 		}
 	case calResult:

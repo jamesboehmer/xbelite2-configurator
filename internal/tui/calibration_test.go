@@ -156,3 +156,64 @@ func TestCalibrationStaleTickIgnored(t *testing.T) {
 		t.Fatal("tick after closing acted")
 	}
 }
+
+func finishDemo(t *testing.T, m Model) Model {
+	t.Helper()
+	m = tickCal(t, fwPress(t, openCal(t, m), "enter"))
+	for i := 0; i < 6; i++ {
+		m = fwPress(t, m, "n")
+	}
+	return tickCal(t, m)
+}
+
+func TestCalibrationFinishSendsInitEvenIfReadFails(t *testing.T) {
+	m, dev := calModel(t)
+	m = openCal(t, m)
+	m = tickCal(t, fwPress(t, m, "enter"))
+	dev.ReadErr = errors.New("read failed")
+	for i := 0; i < 6; i++ {
+		m = fwPress(t, m, "n")
+	}
+	m = tickCal(t, m)
+	if m.cal.stage != calResult || dev.Inits != 1 || !strings.Contains(m.View(), "read failed") {
+		t.Fatalf("stage %d inits %d:\n%s", m.cal.stage, dev.Inits, m.View())
+	}
+}
+
+func TestCalibrationQuitKeysAfterCalibrating(t *testing.T) {
+	m, dev := calModel(t)
+	m = finishDemo(t, m)
+	if m.cal.stage != calResult {
+		t.Fatalf("stage %d", m.cal.stage)
+	}
+	for _, k := range []string{"ctrl+c", "q"} {
+		if _, cmd := m.Update(fwKey(k)); cmd != nil {
+			if _, quit := cmd().(tea.QuitMsg); quit {
+				t.Errorf("%s quit from the result screen", k)
+			}
+		}
+	}
+	m = fwPress(t, m, "enter")
+	if _, cmd := m.Update(fwKey("ctrl+c")); cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Error("ctrl+c quit from the menu without COMMIT")
+		}
+	}
+	m = fwPress(t, m, "q")
+	if m.cal != nil || dev.Commits != 1 {
+		t.Fatalf("cal %+v commits %d", m.cal, dev.Commits)
+	}
+}
+
+func TestCalibrationResumeFromConfirmGetsFreshRest(t *testing.T) {
+	m, _ := calModel(t)
+	m = tickCal(t, fwPress(t, openCal(t, m), "enter"))
+	for i := 0; i < 6; i++ {
+		m = fwPress(t, m, "n")
+	}
+	old := m.cal.rest
+	m = fwPress(t, m, "esc", "n")
+	if m.cal.stage != calRestEnd || m.cal.rest == old {
+		t.Fatalf("stage %d, rest reused %v", m.cal.stage, m.cal.rest == old)
+	}
+}

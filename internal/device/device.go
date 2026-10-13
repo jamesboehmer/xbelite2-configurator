@@ -517,6 +517,7 @@ type Fake struct {
 	Inits     int
 	Commits   int
 	CalErr    error // returned by ReadCalibration and StartCalibration when set
+	ReadErr   error // returned by ReadCalibration only
 	axes      protocol.Axes
 }
 
@@ -572,6 +573,9 @@ func (f *Fake) Rumble(m protocol.Motors) error {
 func (f *Fake) ReadCalibration(target byte) (protocol.Calibration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ReadErr != nil {
+		return protocol.Calibration{}, f.ReadErr
+	}
 	if f.CalErr != nil {
 		return protocol.Calibration{}, f.CalErr
 	}
