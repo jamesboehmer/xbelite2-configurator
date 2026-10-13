@@ -92,7 +92,10 @@ func Flash(link Link, img *Image, opts Options, progress func(Event)) error {
 		return fmt.Errorf("controller reports firmware %s after flashing, expected %s", got, want)
 	}
 	progress(Event{Rebooting: true})
-	return link.Reset()
+	if err := link.Reset(); err != nil {
+		return fmt.Errorf("firmware %s installed, but the controller didn't come back after the final reboot: %w", img.Regions[RegionApp].Version, err)
+	}
+	return nil
 }
 
 type session struct {
@@ -273,8 +276,14 @@ func (s *session) awaitAck(seq byte, received int) error {
 		if err != nil {
 			return fmt.Errorf("%w (ACK at byte %d)", err, received)
 		}
-		if a, ok := ParseAck(p); ok && a.Seq == seq && a.Received == received {
+		if a, ok := ParseAck(p); ok && a.Seq == seq {
+			if a.Received != received {
+				return fmt.Errorf("controller acknowledged %d of %d bytes", a.Received, received)
+			}
 			return nil
+		}
+		if p.Cmd == CmdFirmware && len(p.Payload) >= 2 && p.Payload[0] == OpWrite {
+			return fmt.Errorf("controller rejected the write (status 0x%02x)", p.Payload[1])
 		}
 	}
 }
