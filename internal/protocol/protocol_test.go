@@ -111,3 +111,10 @@ func TestColor(t *testing.T) {
 	m.SetColor([3]byte{1, 2, 3}, true)
 	eqHex(t, m[44:49], "6400010203")
 }
+
+// The firmware capture ACKs system frames with the system flag echoed:
+// device `0c 30 73 3c ...` -> host `01 20 73 09 00 0c 20 3c 00 00 00 00 00`.
+func TestAckForSystemFrame(t *testing.T) {
+	dev := append([]byte{0x0c, 0x30, 0x73, 0x3c}, make([]byte, 0x3c)...)
+	eqHex(t, AckFor(dev), "01207309000c203c0000000000")
+}

@@ -243,10 +243,11 @@ func InitRequest(seq byte) []byte { return configFrame(seq, OpInit, 0x00) }
 // PowerOnRequest is the standard GIP "power on" drivers send at connect.
 func PowerOnRequest(seq byte) []byte { return Frame(CmdPower, FlagSystem, seq, []byte{0x00}) }
 
-// AckFor ACKs a device frame that had FlagNeedsAck. Matches capture:
-// device `4d 10 03 3c ...` -> host `01 20 03 09 00 4d 00 3c 00 00 00 00 00`.
+// AckFor ACKs a device frame that had FlagNeedsAck, echoing its system flag.
+// Matches captures: `4d 10 03 3c ...` -> `01 20 03 09 00 4d 00 3c 00 00 00 00 00`,
+// `0c 30 73 3c ...` -> `01 20 73 09 00 0c 20 3c 00 00 00 00 00`.
 func AckFor(pkt []byte) []byte {
-	return Frame(CmdAck, FlagSystem, pkt[2], []byte{0x00, pkt[0], 0x00, pkt[3], 0, 0, 0, 0, 0})
+	return Frame(CmdAck, FlagSystem, pkt[2], []byte{0x00, pkt[0], pkt[1] & FlagSystem, pkt[3], 0, 0, 0, 0, 0})
 }
 
 type Packet struct {

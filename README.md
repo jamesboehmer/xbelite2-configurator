@@ -54,10 +54,23 @@ sudo ./xbelite2-configurator -pid 0x0b22             # if your controller report
 ```
 
 Keys: `↑/↓` select · `←/→` cycle output · `enter` pick from list · `0` disable ·
-`1/2/3` profile · `tab` standard/shift · `c` profile color · `d` reset · `r` reload · `w` write · `q` quit.
+`1/2/3` profile · `tab` standard/shift · `c` profile color · `d` reset · `r` reload · `w` write · `f` firmware · `q` quit.
 
 Nothing changes on the controller until you press `w`. It writes all four pages of the
 current profile, the same way Xbox Accessories does, and reads them back to verify.
+
+## Firmware updates
+
+Press `f` to open the firmware screen. It shows the installed firmware and the images you
+can flash: the latest one from Microsoft's firmware manifest, older official ones the app
+knows by name (so you can downgrade), or a local `.bin`. Downloads are checked against the
+SHA-256 in their official filename and cached in your user cache directory.
+
+Flashing takes about 4 minutes over a USB cable, and the controller reboots several times.
+**Don't unplug it while it's flashing.** If a flash is interrupted, the controller stays in
+firmware-update mode. Run the app again and it opens the firmware screen to recover it;
+flashing again is safe and skips the pages already written. The bootloader is never
+written. See [FIRMWARE.md](FIRMWARE.md) for the protocol.
 
 The "Held:" line shows what the controller is reporting live. Press a paddle to see
 which P number it is.

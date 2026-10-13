@@ -1,0 +1,68 @@
+name: Firmware check
+
+# Weekly, look for Elite Series 2 firmware in Microsoft's manifests that
+# internal/firmware/builtin.txt doesn't list yet, and open a PR adding it.
+# fwcheck downloads each new image, checks it against the SHA-256 in its name,
+# and parses it before it touches the list.
+#
+# Needs Settings > Actions > General > "Allow GitHub Actions to create and
+# approve pull requests".
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    name: Check for new firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Look for new firmware
+        id: check
+        run: |
+          added=$(go run ./scripts/fwcheck -list internal/firmware/builtin.txt)
+          if [ -z "$added" ]; then
+            echo "No new firmware."
+            exit 0
+          fi
+          echo "Added: $added"
+          echo "versions=$(echo $added)" >> "$GITHUB_OUTPUT"
+          echo "newest=$(printf '%s\n' $added | sort -V | tail -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        if: steps.check.outputs.versions != ''
+        run: go test ./internal/firmware/ ./scripts/fwcheck/
+
+      - name: Open a pull request
+        if: steps.check.outputs.versions != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSIONS: ${{ steps.check.outputs.versions }}
+          NEWEST: ${{ steps.check.outputs.newest }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          branch="firmware/$NEWEST"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "Branch $branch already exists; leaving its pull request alone."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "Add Elite Series 2 firmware $VERSIONS to the built-in list"
+          git push -u origin "$branch"
+          gh pr create --base "$BASE" --head "$branch" \
+            --title "Add Elite Series 2 firmware $VERSIONS" \
+            --body "Microsoft's firmware manifest lists Elite Series 2 firmware that the built-in list doesn't have yet: **$VERSIONS**.
+
+          fwcheck downloaded each image, checked it against the SHA-256 in its filename, and parsed it. Adding it to \`internal/firmware/builtin.txt\` keeps it on the firmware screen after the manifest moves on to a later release."

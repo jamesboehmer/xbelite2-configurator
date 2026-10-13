@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/google/gousb"
 
 	"xbelite2-configurator/internal/device"
+	"xbelite2-configurator/internal/firmware"
 	"xbelite2-configurator/internal/fixture"
 	"xbelite2-configurator/internal/pcap"
 	"xbelite2-configurator/internal/tui"
@@ -44,7 +47,6 @@ func run(demo bool, capture, decode, pidStr, debug string) error {
 		return pcap.Dump(os.Stdout, decode)
 	}
 
-	var dev device.Controller
 	if demo {
 		pages := fixture.Pages()
 		if capture != "" {
@@ -53,32 +55,82 @@ func run(demo bool, capture, decode, pidStr, debug string) error {
 				return err
 			}
 		}
-		dev = device.NewFake(pages)
-	} else {
-		var pid gousb.ID
-		if pidStr != "" {
-			v, err := strconv.ParseUint(pidStr, 0, 16)
-			if err != nil {
-				return fmt.Errorf("bad -pid: %v", err)
-			}
-			pid = gousb.ID(v)
+		dev := device.NewFake(pages)
+		return tui.Run(dev, demoFirmware(dev))
+	}
+
+	var pid gousb.ID
+	if pidStr != "" {
+		v, err := strconv.ParseUint(pidStr, 0, 16)
+		if err != nil {
+			return fmt.Errorf("bad -pid: %v", err)
 		}
-		var logw io.Writer
-		if debug != "" {
-			f, err := os.OpenFile(debug, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			logw = f
-		}
-		fmt.Fprintln(os.Stderr, "Connecting to controller...")
-		u, err := device.Open(pid, logw)
+		pid = gousb.ID(v)
+	}
+	var logw io.Writer
+	if debug != "" {
+		f, err := os.OpenFile(debug, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			return err
 		}
-		dev = u
+		defer f.Close()
+		logw = f
 	}
-	defer dev.Close()
-	return tui.Run(dev)
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		cache = os.TempDir()
+	}
+	env := tui.FirmwareEnv{
+		Source:   firmware.NewCatalog(filepath.Join(cache, "xbelite2-configurator", "firmware")),
+		OpenLink: func() (firmware.Link, error) { return device.OpenFirmwareLink(pid, logw) },
+		Reopen: func(l firmware.Link) (device.Controller, error) {
+			if l != nil {
+				l.Close()
+			}
+			return device.Open(pid, logw)
+		},
+	}
+	fmt.Fprintln(os.Stderr, "Connecting to controller...")
+	u, err := device.Open(pid, logw)
+	if err != nil {
+		if link, ok := bootloaderLink(pid, logw); ok {
+			fmt.Fprintln(os.Stderr, "The controller is in firmware-update mode; opening recovery.")
+			return tui.RunRecovery(link, env)
+		}
+		return err
+	}
+	return tui.Run(u, env)
+}
+
+// bootloaderLink checks whether a controller that failed the normal handshake
+// answers the firmware protocol, as it does when stuck in its bootloader.
+// OpenFirmwareLink also tries 0x0b00, which is what the bootloader enumerates
+// as even when -pid names another normal-mode id.
+func bootloaderLink(pid gousb.ID, logw io.Writer) (firmware.Link, bool) {
+	link, err := device.OpenFirmwareLink(pid, logw)
+	if err != nil {
+		return nil, false
+	}
+	if _, err := firmware.Probe(link); err != nil {
+		link.Close()
+		return nil, false
+	}
+	return link, true
+}
+
+// demoFirmware pretends the controller runs 5.24.4.0 and flashes synthetic
+// images slowly enough to watch.
+func demoFirmware(dev device.Controller) tui.FirmwareEnv {
+	installed, err := firmware.Parse(firmware.DemoImage(firmware.Version{Major: 5, Minor: 24, Build: 4}))
+	if err != nil {
+		panic(err)
+	}
+	bl := firmware.NewFakeBootloader(installed)
+	bl.Delay = 10 * time.Millisecond
+	bl.ResetDelay = time.Second
+	return tui.FirmwareEnv{
+		Source:   firmware.DemoSource{},
+		OpenLink: func() (firmware.Link, error) { return bl, nil },
+		Reopen:   func(firmware.Link) (device.Controller, error) { return dev, nil },
+	}
 }

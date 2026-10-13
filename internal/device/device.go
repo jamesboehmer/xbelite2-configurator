@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/gousb"
 
+	"xbelite2-configurator/internal/firmware"
 	"xbelite2-configurator/internal/protocol"
 )
 
@@ -72,6 +73,9 @@ type USB struct {
 	lastInput string
 	active    byte
 
+	fw        chan protocol.Packet // firmware frames and their ACKs, for FirmwareLink
+	closeOnce sync.Once
+
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -86,13 +90,31 @@ func permHint(err error) error {
 // Open finds and claims the controller. pid 0 tries the known product IDs.
 // debug, if non-nil, receives a log of every USB step and packet.
 func Open(pid gousb.ID, debug io.Writer) (*USB, error) {
+	lg := newLogger(debug)
+	return withRetries(lg, func() (*USB, error) {
+		u, err := openRaw(pid, lg, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := u.handshake(); err != nil {
+			u.Close()
+			return nil, err
+		}
+		return u, nil
+	})
+}
+
+func newLogger(debug io.Writer) *log.Logger {
 	if debug == nil {
 		debug = io.Discard
 	}
-	lg := log.New(debug, "", log.Lmicroseconds)
+	return log.New(debug, "", log.Lmicroseconds)
+}
+
+func withRetries(lg *log.Logger, try func() (*USB, error)) (*USB, error) {
 	var lastErr error
 	for attempt := 1; attempt <= openAttempts; attempt++ {
-		u, err := open(pid, lg)
+		u, err := try()
 		if err == nil {
 			return u, nil
 		}
@@ -109,7 +131,7 @@ func Open(pid gousb.ID, debug io.Writer) (*USB, error) {
 var errNotFound = errors.New("no Elite Series 2 found over USB. Plug it in with a data cable " +
 	"(Bluetooth and the wireless adapter are not supported)")
 
-func open(pid gousb.ID, lg *log.Logger) (*USB, error) {
+func openRaw(pid gousb.ID, lg *log.Logger, fw chan protocol.Packet) (*USB, error) {
 	ctx := gousb.NewContext()
 	ids := ProductIDs
 	if pid != 0 {
@@ -136,7 +158,7 @@ func open(pid gousb.ID, lg *log.Logger) (*USB, error) {
 		return nil, errNotFound
 	}
 	u := &USB{ctx: ctx, dev: dev, timeout: time.Second, log: lg,
-		replies: make(chan protocol.Packet, 16), seen: make(chan struct{}), done: make(chan struct{})}
+		replies: make(chan protocol.Packet, 16), seen: make(chan struct{}), done: make(chan struct{}), fw: fw}
 	if err := u.claim(); err != nil {
 		u.closeUSB()
 		return nil, err
@@ -144,10 +166,6 @@ func open(pid gousb.ID, lg *log.Logger) (*USB, error) {
 	rctx, cancel := context.WithCancel(context.Background())
 	u.cancel = cancel
 	go u.readLoop(rctx)
-	if err := u.handshake(); err != nil {
-		u.Close()
-		return nil, err
-	}
 	return u, nil
 }
 
@@ -271,6 +289,14 @@ func (u *USB) readLoop(ctx context.Context) {
 				u.log.Printf("input %s", s)
 			}
 			u.stateMu.Unlock()
+		case protocol.CmdAck, firmware.CmdFirmware:
+			if u.fw != nil && (pkt.Cmd == firmware.CmdFirmware || len(pkt.Payload) > 1 && pkt.Payload[1] == firmware.CmdFirmware) {
+				select {
+				case u.fw <- pkt:
+				default:
+					u.log.Printf("firmware frame dropped: %x", data)
+				}
+			}
 		case protocol.CmdConfig:
 			select {
 			case u.replies <- pkt:
@@ -402,12 +428,14 @@ func (u *USB) WriteProfile(profile int, pages map[byte][]byte) error {
 }
 
 func (u *USB) Close() {
-	if u.cancel != nil {
-		u.cancel()
-		<-u.done
-	}
-	u.closeUSB()
-	u.log.Printf("closed; controller handed back to the OS driver")
+	u.closeOnce.Do(func() {
+		if u.cancel != nil {
+			u.cancel()
+			<-u.done
+		}
+		u.closeUSB()
+		u.log.Printf("closed; controller handed back to the OS driver")
+	})
 }
 
 func (u *USB) closeUSB() {

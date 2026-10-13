@@ -9,3 +9,6 @@
 # debug logs
 *.log
 *.log[0-9]*
+
+# local firmware capture and images (account IDs, Microsoft's binaries)
+/.tmp/

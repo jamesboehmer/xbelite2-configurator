@@ -14,6 +14,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"xbelite2-configurator/internal/device"
+	"xbelite2-configurator/internal/firmware"
 	"xbelite2-configurator/internal/protocol"
 )
 
@@ -58,6 +59,17 @@ func (s *Store) Load(profile int) error {
 		}
 	}
 	delete(s.Dirty, profile)
+	return nil
+}
+
+// Reconnect switches to a reopened controller and reloads every profile.
+func (s *Store) Reconnect(dev device.Controller) error {
+	s.dev = dev
+	for _, p := range protocol.Profiles {
+		if err := s.Load(p); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -177,6 +189,9 @@ type Model struct {
 	color       *colorPicker
 	width       int
 	height      int
+	fwEnv       FirmwareEnv
+	fw          *fwScreen
+	initCmd     tea.Cmd
 }
 
 func New(store *Store) Model {
@@ -191,7 +206,12 @@ func tick() tea.Cmd {
 	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-func (m Model) Init() tea.Cmd { return tick() }
+func (m Model) Init() tea.Cmd {
+	if m.initCmd != nil {
+		return tea.Batch(tick(), m.initCmd)
+	}
+	return tick()
+}
 
 func (m Model) current() protocol.Input { return protocol.Inputs[m.row] }
 
@@ -282,9 +302,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = msg.ok
 		}
+	case fwOpenedMsg, fwDownloadMsg, fwImageMsg, fwLinkMsg, fwEventMsg, fwDoneMsg, fwReopenedMsg:
+		if m.fw != nil {
+			return m.updateFirmwareMsg(msg)
+		}
 	case tea.KeyMsg:
+		if m.fw != nil && m.fw.stage == fwFlashing {
+			return m, nil // never leave a controller half-flashed
+		}
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+		if m.fw != nil {
+			return m.updateFirmwareKey(msg)
 		}
 		if m.busy {
 			return m, nil
@@ -342,6 +372,8 @@ func (m Model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setCurrent(0x00, "->")
 	case "1", "2", "3":
 		m.profile = int(key[0] - '0')
+	case "f":
+		return m.openFirmware()
 	case "c":
 		rgb, custom := m.store.Color(m.profile)
 		m.color = newColorPicker(rgb, custom)
@@ -387,9 +419,12 @@ var (
 )
 
 const help = "↑/↓ select   ←/→ change output   enter pick from list   0 disable\n" +
-	"1/2/3 profile   tab standard/shift   c color   d reset profile   r reload   w write   q quit"
+	"1/2/3 profile   tab standard/shift   c color   d reset profile   r reload   w write   f firmware   q quit"
 
 func (m Model) View() string {
+	if m.fw != nil {
+		return m.fw.view(m.status)
+	}
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Xbox Elite Series 2 remapper") + "\n\n")
 
@@ -470,16 +505,37 @@ func (m Model) View() string {
 	return b.String()
 }
 
-// Run loads all profiles and starts the UI.
-func Run(dev device.Controller) error {
+// Run loads all profiles and starts the UI. It owns dev and closes it.
+func Run(dev device.Controller, env FirmwareEnv) error {
 	store, err := NewStore(dev)
 	if err != nil {
+		dev.Close()
 		return err
 	}
+	m := New(store)
+	m.fwEnv = env
+	return runProgram(m)
+}
+
+// RunRecovery starts on the firmware screen for a controller in its bootloader.
+func RunRecovery(link firmware.Link, env FirmwareEnv) error {
+	return runProgram(NewRecovery(env, link))
+}
+
+func runProgram(m Model) error {
 	useTrueColorUnderSudo()
-	_, err = tea.NewProgram(New(store), tea.WithAltScreen()).Run()
-	if perr := store.EndPreview(); err == nil && perr != nil {
-		err = fmt.Errorf("could not end LED preview: %w", perr)
+	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	fm, _ := final.(Model)
+	if fm.fw != nil && fm.fw.link != nil {
+		fm.fw.link.Close()
+	}
+	if fm.store != nil {
+		if fm.fw == nil {
+			if perr := fm.store.EndPreview(); err == nil && perr != nil {
+				err = fmt.Errorf("could not end LED preview: %w", perr)
+			}
+		}
+		fm.store.dev.Close()
 	}
 	return err
 }
