@@ -14,8 +14,8 @@ import (
 // The flash capture and the image aren't committed: the capture holds account
 // IDs and serials, the image is Microsoft's. To run:
 //
-//	XBE2_FW_CAPTURE=.tmp/usbpcap2-flash.pcap \
-//	XBE2_FW_BIN=.tmp/DELP_045E_0B00_v_5_23_6_0_h_....bin go test ./internal/firmware/ -run Replay
+//	XBE2_FW_CAPTURE=$PWD/.tmp/usbpcap2-flash.pcap \
+//	XBE2_FW_BIN=$PWD/.tmp/DELP_045E_0B00_v_5_23_6_0_h_....bin go test ./internal/firmware/ -run Replay
 //
 // The controller's recorded replies are served back to Flash, and every frame
 // on the write path must match the Windows app's byte for byte, ignoring
