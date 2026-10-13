@@ -33,7 +33,7 @@ type FirmwareLink struct {
 
 func OpenFirmwareLink(pid gousb.ID, debug io.Writer) (*FirmwareLink, error) {
 	f := &FirmwareLink{pid: pid, log: newLogger(debug), frames: make(chan protocol.Packet, 64)}
-	u, err := withRetries(f.log, func() (*USB, error) { return openRaw(pid, f.log, f.frames) })
+	u, err := withRetries(f.log, f.open)
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +43,31 @@ func OpenFirmwareLink(pid gousb.ID, debug io.Writer) (*FirmwareLink, error) {
 		return nil, err
 	}
 	return f, nil
+}
+
+// bootloaderPID is what the bootloader enumerates as, whatever -pid says the
+// controller uses in normal mode.
+const bootloaderPID gousb.ID = 0x0B00
+
+// ids returns the product ids the link accepts: the override plus the
+// bootloader's, or every known id when there is no override.
+func (f *FirmwareLink) ids() []gousb.ID {
+	if f.pid == 0 || f.pid == bootloaderPID {
+		return ProductIDs
+	}
+	return []gousb.ID{f.pid, bootloaderPID}
+}
+
+// open tries the override pid first, then the bootloader's.
+func (f *FirmwareLink) open() (*USB, error) {
+	if f.pid == 0 {
+		return openRaw(0, f.log, f.frames)
+	}
+	u, err := openRaw(f.pid, f.log, f.frames)
+	if errors.Is(err, errNotFound) && f.pid != bootloaderPID {
+		return openRaw(bootloaderPID, f.log, f.frames)
+	}
+	return u, err
 }
 
 func (f *FirmwareLink) NextSeq() byte { f.seq = f.seq%0xFF + 1; return f.seq }
@@ -70,15 +95,25 @@ func (f *FirmwareLink) Reset() error {
 	if err := f.Send(firmware.ResetRequest(f.NextSeq())); err != nil {
 		f.log.Printf("reset send: %v (controller may already be rebooting)", err)
 	}
+	var oldBus, oldAddr int
+	if f.u != nil {
+		oldBus, oldAddr = f.u.dev.Desc.Bus, f.u.dev.Desc.Address
+	}
 	f.Close()
-	f.waitGone()
+	f.waitGone(oldBus, oldAddr)
 	deadline := time.Now().Add(reacquireFor)
 	var lastErr error
 	for time.Now().Before(deadline) {
 		time.Sleep(reacquirePoll)
-		u, err := openRaw(f.pid, f.log, f.frames)
+		u, err := f.open()
 		if err != nil {
 			lastErr = err
+			continue
+		}
+		if oldAddr != 0 && u.dev.Desc.Bus == oldBus && u.dev.Desc.Address == oldAddr {
+			// The pre-reset instance is still listed; wait for the new one.
+			u.Close()
+			lastErr = errors.New("old device instance still present")
 			continue
 		}
 		f.u = u
@@ -94,12 +129,12 @@ func (f *FirmwareLink) Reset() error {
 	return fmt.Errorf("controller did not come back within %s after rebooting (%v)", reacquireFor, lastErr)
 }
 
-func (f *FirmwareLink) waitGone() {
+func (f *FirmwareLink) waitGone(bus, addr int) {
 	ctx := gousb.NewContext()
 	defer ctx.Close()
 	deadline := time.Now().Add(dropFor)
 	for time.Now().Before(deadline) {
-		if !f.present(ctx) {
+		if !f.present(ctx, bus, addr) {
 			f.log.Printf("controller dropped off the bus")
 			return
 		}
@@ -108,11 +143,13 @@ func (f *FirmwareLink) waitGone() {
 	f.log.Printf("controller still listed %s after reset", dropFor)
 }
 
-// present lists devices without opening any.
-func (f *FirmwareLink) present(ctx *gousb.Context) bool {
+// present lists devices without opening any, and reports whether the device
+// at bus/addr is still there. With no known address (0) any matching device
+// counts.
+func (f *FirmwareLink) present(ctx *gousb.Context, bus, addr int) bool {
 	found := false
 	devs, _ := ctx.OpenDevices(func(d *gousb.DeviceDesc) bool {
-		if d.Vendor == VendorID && (d.Product == f.pid || f.pid == 0 && slices.Contains(ProductIDs, d.Product)) {
+		if d.Vendor == VendorID && slices.Contains(f.ids(), d.Product) && (addr == 0 || d.Bus == bus && d.Address == addr) {
 			found = true
 		}
 		return false

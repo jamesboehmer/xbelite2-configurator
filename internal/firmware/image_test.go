@@ -63,6 +63,23 @@ func TestParseRejects(t *testing.T) {
 	}
 }
 
+func TestParseRejectsOversizedRegion(t *testing.T) {
+	big := testRegion(RegionApp, AppBase, AppSlotSize/PageSize+1, 0x33)
+	for _, regs := range [][]Region{
+		{testRegion(RegionStaging, AppBase, 1, 0x44), big},
+		{func() Region { r := big; r.Type = RegionStaging; return r }(), testRegion(RegionApp, AppBase, 1, 0x33)},
+	} {
+		_, err := Parse(Build(Version{5, 23, 6, 0}, regs...))
+		if err == nil || !strings.Contains(err.Error(), "larger than the 0x7e000-byte app slot") {
+			t.Errorf("got %v", err)
+		}
+	}
+	ok := testRegion(RegionApp, AppBase, AppSlotSize/PageSize, 0x33)
+	if _, err := Parse(Build(Version{5, 23, 6, 0}, testRegion(RegionStaging, AppBase, 1, 0x44), ok)); err != nil {
+		t.Errorf("slot-sized region rejected: %v", err)
+	}
+}
+
 func TestVersionCompare(t *testing.T) {
 	a, b := Version{5, 21, 3242, 0}, Version{5, 23, 6, 0}
 	if a.Compare(b) != -1 || b.Compare(a) != 1 || a.Compare(a) != 0 {

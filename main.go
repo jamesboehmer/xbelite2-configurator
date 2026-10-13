@@ -104,6 +104,8 @@ func run(demo bool, capture, decode, pidStr, debug string) error {
 
 // bootloaderLink checks whether a controller that failed the normal handshake
 // answers the firmware protocol, as it does when stuck in its bootloader.
+// OpenFirmwareLink also tries 0x0b00, which is what the bootloader enumerates
+// as even when -pid names another normal-mode id.
 func bootloaderLink(pid gousb.ID, logw io.Writer) (firmware.Link, bool) {
 	link, err := device.OpenFirmwareLink(pid, logw)
 	if err != nil {

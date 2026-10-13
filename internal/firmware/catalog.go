@@ -190,9 +190,17 @@ func (p *progressReader) Read(b []byte) (int, error) {
 // SHA-256 and the file matches it; a name with a hash that doesn't match is
 // an error.
 func LoadLocal(path string) ([]byte, bool, error) {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, false, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxImageSize+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if len(b) > maxImageSize {
+		return nil, false, fmt.Errorf("%s is too large to be a firmware image", filepath.Base(path))
 	}
 	if _, want, ok := ParseFilename(path); ok {
 		if sha256.Sum256(b) != want {

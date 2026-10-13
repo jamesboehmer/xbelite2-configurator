@@ -238,3 +238,87 @@ func TestFirmwareMidPassRetrySkipsPreamble(t *testing.T) {
 		t.Error("mid-pass retry sent op 00")
 	}
 }
+
+func countFrames(bl *firmware.FakeBootloader, op byte) int {
+	n := 0
+	for _, s := range bl.Sent {
+		if len(s) > 4 && s[0] == firmware.CmdFirmware && s[1]&0x80 == 0 && s[4] == op {
+			n++
+		}
+	}
+	return n
+}
+
+func TestFirmwareDeclinedImageIsNeverFlashedByRetry(t *testing.T) {
+	env, bl := fwEnv(t)
+	env.Reopen = func(firmware.Link) (device.Controller, error) { return nil, errors.New("unplugged") }
+	m := fwPress(t, newFwModel(t, env), "f", "enter", "n")
+	if m.fw.stage != fwList || m.fw.img != nil {
+		t.Fatalf("decline kept the image: %+v", m.fw)
+	}
+	m = fwPress(t, m, "esc")
+	if m.fw == nil || m.fw.stage != fwFailed {
+		t.Fatalf("expected a failed reopen: %+v", m.fw)
+	}
+	m = fwPress(t, m, "enter", "r")
+	if m.fw == nil || m.fw.stage != fwFailed {
+		t.Fatalf("stage %+v", m.fw)
+	}
+	if countFrames(bl, firmware.OpStart) != 0 || bl.Resets != 0 {
+		t.Errorf("a flash started: %d op 02, %d resets", countFrames(bl, firmware.OpStart), bl.Resets)
+	}
+	if v := m.View(); strings.Contains(v, "firmware-update mode") {
+		t.Errorf("reconnect failure mentions the bootloader:\n%s", v)
+	}
+}
+
+func TestFirmwareReconnectRetryOnlyReopens(t *testing.T) {
+	env, bl := fwEnv(t)
+	ok := env.Reopen
+	calls := 0
+	env.Reopen = func(l firmware.Link) (device.Controller, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("unplugged")
+		}
+		return ok(l)
+	}
+	m := fwPress(t, newFwModel(t, env), "f", "enter", "y")
+	if m.fw == nil || m.fw.stage != fwFailed || m.fw.failed != failReconnect {
+		t.Fatalf("expected a reconnect failure: %+v", m.fw)
+	}
+	v := m.View()
+	if !strings.Contains(v, "Couldn't reconnect to the controller") || !strings.Contains(v, "Press r to try again.") || strings.Contains(v, "firmware-update mode") {
+		t.Errorf("view:\n%s", v)
+	}
+	infos, starts, resets := countInfo(bl), countFrames(bl, firmware.OpStart), bl.Resets
+	m = fwPress(t, m, "r")
+	if m.fw != nil || calls != 2 {
+		t.Fatalf("fw %+v, %d reopen calls", m.fw, calls)
+	}
+	if !strings.Contains(m.status, "installed") {
+		t.Errorf("status %q", m.status)
+	}
+	if countInfo(bl) != infos || countFrames(bl, firmware.OpStart) != starts || bl.Resets != resets {
+		t.Error("retry flashed again")
+	}
+}
+
+func TestRecoveryBanner(t *testing.T) {
+	env, bl := fwEnv(t)
+	bl.InBootloader = true
+	m := NewRecovery(env, bl)
+	m = drive(t, m, m.initCmd)
+	if v := m.View(); !strings.Contains(v, "didn't answer normally") || strings.Contains(v, "firmware-update mode") {
+		t.Errorf("app version known:\n%s", v)
+	}
+}
+
+func TestFirmwareConfirmUnknownInstalled(t *testing.T) {
+	env, _ := fwEnv(t)
+	m := fwPress(t, newFwModel(t, env), "f", "enter")
+	m.fw.known = false
+	if v := m.View(); !strings.Contains(v, "Installed now:  unknown (couldn't read the controller)") {
+		t.Errorf("view:\n%s", v)
+	}
+}

@@ -22,10 +22,12 @@ const (
 )
 
 const (
-	AppBase   = 0x10027000 // the one app slot both passes write
-	PageSize  = 0x1000
-	VendorID  = 0x045e
-	ProductID = 0x0b00
+	AppBase = 0x10027000 // the one app slot both passes write
+	// AppSlotSize is that slot's size; larger regions would run past it.
+	AppSlotSize = 0x7E000
+	PageSize    = 0x1000
+	VendorID    = 0x045e
+	ProductID   = 0x0b00
 
 	headerSize = 0x100
 	maxRegions = 3
@@ -123,6 +125,8 @@ func Parse(b []byte) (*Image, error) {
 			return nil, fmt.Errorf("firmware is missing region %d", t)
 		case r.Addr != AppBase:
 			return nil, fmt.Errorf("firmware region %d has load address %#x, expected %#x", t, r.Addr, AppBase)
+		case len(r.Data) > AppSlotSize:
+			return nil, fmt.Errorf("firmware region %d is %#x bytes, larger than the %#x-byte app slot", t, len(r.Data), AppSlotSize)
 		case len(r.Data) == 0 || len(r.Data)%PageSize != 0:
 			return nil, fmt.Errorf("firmware region %d size %#x is not a multiple of 4096", t, len(r.Data))
 		}

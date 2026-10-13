@@ -147,6 +147,19 @@ func TestLoadLocal(t *testing.T) {
 	}
 }
 
+func TestLoadLocalTooLarge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.bin")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Truncate(maxImageSize + 1)
+	f.Close()
+	if _, _, err := LoadLocal(path); err == nil || !strings.Contains(err.Error(), "too large to be a firmware image") {
+		t.Errorf("got %v", err)
+	}
+}
+
 func TestCatalogRejectsPathTraversalInManifest(t *testing.T) {
 	img := DemoImage(v5236)
 	validName := Filename(v5236, sha256.Sum256(img))

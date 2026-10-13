@@ -52,8 +52,8 @@ func TestFlashFromNormalMode(t *testing.T) {
 			t.Errorf("pass %d: %+v", pass, e)
 		}
 	}
-	if !evs[len(evs)-1].Rebooting {
-		t.Error("last event isn't the final reboot")
+	if last, p2 := evs[len(evs)-1], lastPass(evs, 2); !last.Rebooting || last.Pass != 2 || last.Done != p2.Done || last.Total != p2.Total || last.Written != p2.Written || last.Skipped != p2.Skipped {
+		t.Errorf("last event %+v isn't the final reboot with pass 2 counts %+v", last, p2)
 	}
 	// The normal-mode preamble, in capture order.
 	if got := f.Sent[0]; got[0] != protocol.CmdPower || got[1] != 0x21 {

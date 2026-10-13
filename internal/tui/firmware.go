@@ -41,8 +41,19 @@ const (
 	fwFailed
 )
 
+// fwFail records what went wrong, so a retry redoes only that step.
+type fwFail int
+
+const (
+	failOpen      fwFail = iota // couldn't switch to or open the firmware link
+	failFlash                   // the flash itself failed; the controller is likely in its bootloader
+	failReconnect               // flashed or left fine, but reopening normal mode failed
+)
+
 type fwScreen struct {
 	stage    fwStage
+	failed   fwFail
+	okMsg    string // status shown once the reopen succeeds
 	recovery bool
 	link     firmware.Link
 	state    firmware.State
@@ -128,6 +139,7 @@ func (m Model) openFirmware() (tea.Model, tea.Cmd) {
 // reopen goes back to normal mode and reloads (or first loads) the profiles.
 func (m Model) reopen(ok string) tea.Cmd {
 	env, link, store := m.fwEnv, m.fw.link, m.store
+	m.fw.okMsg = ok
 	return func() tea.Msg {
 		dev, err := env.Reopen(link)
 		if err != nil {
@@ -188,6 +200,19 @@ func (m Model) loadLocal(path string) tea.Cmd {
 	}
 }
 
+// openAgain retries opening the firmware link after an open failure.
+func (m Model) openAgain() (tea.Model, tea.Cmd) {
+	m.fw.stage, m.fw.busyMsg = fwBusy, "Switching the controller to firmware mode..."
+	env := m.fwEnv
+	return m, func() tea.Msg {
+		link, err := env.OpenLink()
+		if err != nil {
+			return fwOpenedMsg{err: err}
+		}
+		return probeAndList(env, link)
+	}
+}
+
 // startFlash runs Flash in the background. A retry reopens the link first,
 // since a failed reset leaves the old one disconnected.
 func (m Model) startFlash(retry bool) (tea.Model, tea.Cmd) {
@@ -223,7 +248,7 @@ func (m Model) updateFirmwareMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fwOpenedMsg:
 		if msg.err != nil {
-			f.stage, f.errMsg = fwFailed, "Couldn't open the controller for a firmware update: "+msg.err.Error()
+			f.stage, f.failed, f.errMsg = fwFailed, failOpen, "Couldn't open the controller for a firmware update: "+msg.err.Error()
 			return m, nil
 		}
 		f.link, f.state, f.known, f.entries, f.note = msg.link, msg.state, msg.known, msg.entries, msg.note
@@ -249,7 +274,7 @@ func (m Model) updateFirmwareMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitFw(f.events)
 	case fwDoneMsg:
 		if msg.err != nil {
-			f.stage, f.errMsg = fwFailed, msg.err.Error()
+			f.stage, f.failed, f.errMsg = fwFailed, failFlash, msg.err.Error()
 			return m, nil
 		}
 		f.stage, f.busyMsg = fwBusy, "Reconnecting to the controller..."
@@ -257,7 +282,7 @@ func (m Model) updateFirmwareMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fwReopenedMsg:
 		if msg.err != nil {
 			f.link = nil
-			f.stage, f.errMsg = fwFailed, "Couldn't reconnect to the controller: "+msg.err.Error()
+			f.stage, f.failed, f.errMsg = fwFailed, failReconnect, msg.err.Error()
 			return m, nil
 		}
 		if m.store == nil {
@@ -315,12 +340,18 @@ func (m Model) updateFirmwareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "y":
 			return m.startFlash(false)
 		case "n", "esc":
-			f.stage = fwList
+			f.stage, f.img = fwList, nil
 		}
 	case fwFailed:
 		switch k {
-		case "r", "enter":
-			if f.img != nil {
+		case "r":
+			switch {
+			case f.failed == failOpen:
+				return m.openAgain()
+			case f.failed == failReconnect:
+				f.stage, f.busyMsg = fwBusy, "Reconnecting to the controller..."
+				return m, m.reopen(f.okMsg)
+			case f.img != nil:
 				return m.startFlash(true)
 			}
 		case "esc":
@@ -340,7 +371,11 @@ func (f *fwScreen) view(status string) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Xbox Elite Series 2 firmware") + "\n\n")
 	if f.recovery {
-		b.WriteString(boldStyle.Render(" The controller is in firmware-update mode. Flash a firmware to recover it.") + "\n\n")
+		if f.known && !f.state.App.IsZero() {
+			b.WriteString(boldStyle.Render(" The controller didn't answer normally. You can flash firmware here, or quit and reconnect it.") + "\n\n")
+		} else {
+			b.WriteString(boldStyle.Render(" The controller is in firmware-update mode. Flash a firmware to recover it.") + "\n\n")
+		}
 	}
 	if f.known {
 		boot := "unknown"
@@ -384,9 +419,16 @@ func (f *fwScreen) view(status string) string {
 	case fwFlashing:
 		b.WriteString(f.progressView())
 	case fwFailed:
-		b.WriteString(" " + boldStyle.Render("Firmware update failed: "+f.errMsg) + "\n\n")
-		b.WriteString(" The controller is probably in firmware-update mode. Retrying is safe:\n" +
-			" pages already written are skipped, and the bootloader is never touched.\n")
+		switch f.failed {
+		case failOpen:
+			b.WriteString(" " + boldStyle.Render(f.errMsg) + "\n\n Press r to try again.\n")
+		case failReconnect:
+			b.WriteString(" " + boldStyle.Render("Couldn't reconnect to the controller: "+f.errMsg) + "\n\n Press r to try again.\n")
+		default:
+			b.WriteString(" " + boldStyle.Render("Firmware update failed: "+f.errMsg) + "\n\n")
+			b.WriteString(" The controller is probably in firmware-update mode. Retrying is safe:\n" +
+				" pages already written are skipped, and the bootloader is never touched.\n")
+		}
 	}
 	b.WriteString("\n " + boldStyle.Render(status) + "\n\n")
 	b.WriteString(dimStyle.Render(f.help()))
@@ -397,6 +439,9 @@ func (f *fwScreen) confirmView() string {
 	var b strings.Builder
 	to := f.img.Regions[firmware.RegionApp].Version
 	fmt.Fprintf(&b, " Flash firmware %s from %s\n", to, f.label)
+	if !f.known {
+		b.WriteString(" Installed now:  unknown (couldn't read the controller)\n")
+	}
 	if f.known && !f.state.App.IsZero() {
 		fmt.Fprintf(&b, " Installed now:  %s\n", f.state.App)
 		switch to.Compare(f.state.App) {
@@ -453,7 +498,7 @@ func (f *fwScreen) help() string {
 		return "y flash   n cancel"
 	case fwFailed:
 		retry := ""
-		if f.img != nil {
+		if f.failed != failFlash || f.img != nil {
 			retry = "r retry   "
 		}
 		if f.recovery {

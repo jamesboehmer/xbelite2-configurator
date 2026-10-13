@@ -91,7 +91,9 @@ func Flash(link Link, img *Image, opts Options, progress func(Event)) error {
 	if want := img.Regions[RegionApp].Version; got != want {
 		return fmt.Errorf("controller reports firmware %s after flashing, expected %s", got, want)
 	}
-	progress(Event{Rebooting: true})
+	last := s.last
+	last.Pass, last.Rebooting = 2, true
+	progress(last)
 	if err := link.Reset(); err != nil {
 		return fmt.Errorf("firmware %s installed, but the controller didn't come back after the final reboot: %w", img.Regions[RegionApp].Version, err)
 	}
@@ -101,6 +103,7 @@ func Flash(link Link, img *Image, opts Options, progress func(Event)) error {
 type session struct {
 	link     Link
 	progress func(Event)
+	last     Event // last non-reboot event of the latest pass
 }
 
 func (s *session) pass(n int, r *Region) error {
@@ -132,6 +135,7 @@ func (s *session) pass(n int, r *Region) error {
 			ev.Written++
 		}
 		ev.Done = i + 1
+		s.last = ev
 		s.progress(ev)
 	}
 	status, _, err := s.call(FinishRequest(s.link.NextSeq()), OpFinish, nil, replyTimeout)
