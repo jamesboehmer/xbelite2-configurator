@@ -61,6 +61,10 @@ type manifest struct {
 func (c *Catalog) List(ctx context.Context) ([]Entry, string) {
 	byVersion := map[Version]Entry{}
 	add := func(name, source string) {
+		// Reject entries with path traversal characters.
+		if name != filepath.Base(name) || strings.ContainsAny(name, "/\\") {
+			return
+		}
 		if v, _, ok := ParseFilename(name); ok {
 			if _, seen := byVersion[v]; !seen {
 				byVersion[v] = Entry{Version: v, File: name, Source: source}
@@ -119,6 +123,10 @@ func (c *Catalog) manifest(ctx context.Context) (*manifest, error) {
 // Fetch returns the image for e, from the cache if a cached copy still
 // matches the SHA-256 in its name, otherwise downloaded and cached.
 func (c *Catalog) Fetch(ctx context.Context, e Entry, progress func(done, total int64)) ([]byte, error) {
+	// Reject entries with path traversal characters (defense in depth).
+	if e.File != filepath.Base(e.File) || strings.ContainsAny(e.File, "/\\") {
+		return nil, fmt.Errorf("%s is not an official firmware name", e.File)
+	}
 	_, want, ok := ParseFilename(e.File)
 	if !ok {
 		return nil, fmt.Errorf("%s is not an official firmware name", e.File)

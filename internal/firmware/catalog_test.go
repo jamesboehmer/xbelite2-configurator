@@ -146,3 +146,52 @@ func TestLoadLocal(t *testing.T) {
 		t.Error("hash mismatch accepted")
 	}
 }
+
+func TestCatalogRejectsPathTraversalInManifest(t *testing.T) {
+	img := DemoImage(v5236)
+	validName := Filename(v5236, sha256.Sum256(img))
+	traversalName := "../../../../home/user/.config/" + validName
+	// Manifest with both valid and traversal names
+	manifest := `{"g":"pc_ga","v":"1.0.0.23","p":"BASE","d":[
+	  {"__n":"delp","id":"045E_0B00","f":[{"__t":"beta","p":"` + traversalName + `"},{"__t":"beta","p":"` + validName + `"}],"req":[{"v":"5.21.3242.0"}]}]}`
+	srv := cdn(t, manifest, map[string][]byte{validName: img})
+	c := testCatalog(t, srv)
+	c.BuiltIn = nil // Clear built-in list to only test manifest
+	entries, _ := c.List(context.Background())
+	if len(entries) != 1 || entries[0].File != validName {
+		t.Fatalf("expected 1 entry with valid name, got %d entries: %+v", len(entries), entries)
+	}
+}
+
+func TestCatalogFetchRejectsPathTraversalInEntry(t *testing.T) {
+	cacheDir := t.TempDir()
+	c := NewCatalog(cacheDir)
+	img := DemoImage(v5236)
+	validName := Filename(v5236, sha256.Sum256(img))
+
+	// Try to Fetch with a path traversal Entry
+	traversalEntry := Entry{
+		Version: v5236,
+		File:    "../" + validName,
+		Source:  "test",
+	}
+	_, err := c.Fetch(context.Background(), traversalEntry, nil)
+	if err == nil {
+		t.Fatal("Fetch should reject path traversal in Entry.File")
+	}
+	if !strings.Contains(err.Error(), "not an official firmware name") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Verify nothing was created outside CacheDir
+	parent := filepath.Dir(cacheDir)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), validName) {
+			t.Errorf("file created outside cache dir: %s", e.Name())
+		}
+	}
+}
