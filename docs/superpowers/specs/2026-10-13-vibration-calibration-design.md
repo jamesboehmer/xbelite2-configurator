@@ -185,8 +185,9 @@ Pure step detector: `New(kind Kind)`; `Feed(t time.Time, a protocol.Axes) []Even
 - `internal/calibrate`: synthetic circles (both directions first), pushes in order, pulls,
   noise near thresholds, wrong push order not counted.
 - Replay: with `XBE2_CAL_CAPTURE` set, feed the capture's input reports per calibration window
-  into the detector; each step event must fall between 0.75 s before and 0.5 s after the app's
-  soft buzz. Skips when unset.
+  into the detector; each step event must come no later than 0.5 s after the app's soft buzz,
+  and turn and trigger steps no earlier than 0.75 s before it. Push steps may come earlier:
+  in the capture the app ignored a full, straight push made ~2 s after the turn steps. Skips when unset.
 - TUI via `device.Fake`: vibration edit → dirty → write writes bytes 28–31 in both mapping pages;
   test sends one on and one off frame; calibration end to end (demo step keys); cancel path
   sends the finishing read and INIT; quit ignored while running.
