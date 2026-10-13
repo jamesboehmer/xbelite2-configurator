@@ -139,7 +139,12 @@ demo set axes.
 Pure step detector: `New(kind Kind)`; `Feed(t time.Time, a protocol.Axes) []Event`;
 `Step() Step`; `Done() bool`. Kinds: left/right stick, left/right trigger.
 
-- Stick turns: accumulate signed angle change while radius > 60% of full scale; a step
+- Rest: before the start command and before the final read, the stick must have stayed
+  within 15% of centre for 1 s (triggers: below 5%). The read returns only min/max, so how
+  the controller sets centre is unknown; in the capture both sticks were resting at centre at
+  both moments, so we require it.
+- Stick turns: accumulate signed angle change only while radius > 85% of full scale (the
+  controller records extremes, so turns that miss the rim would shrink the range); a step
   completes at |net turns| ≥ 6 in the first direction (either sign), then at 6 turns back
   in the opposite direction (net returns to ~0).
 - Stick pushes, in order up, right, down, left: the axis passes 80% of full scale in that
@@ -160,7 +165,8 @@ Pure step detector: `New(kind Kind)`; `Feed(t time.Time, a protocol.Axes) []Even
   - menu: the four targets with their current values (read on entry);
   - running: step list with the current step highlighted and a count (turns, pulls), a live
     view (a dot in a circle for sticks, a bar for triggers), trigger-lock reminder between
-    trigger rounds; soft buzz per completed step; on completion strong buzz, read, INIT,
+    trigger rounds; "let go of the stick" while waiting for rest before start and before the
+    final read; soft buzz per completed step; on completion strong buzz, read, INIT,
     two strong buzzes, then before/after values and back to the menu;
   - leaving the menu sends COMMIT if any calibration ran;
   - `esc` while running asks to confirm; on confirm the app finishes as the capture does
@@ -188,6 +194,8 @@ Pure step detector: `New(kind Kind)`; `Feed(t time.Time, a protocol.Axes) []Even
 
 ## Open items
 
-- What an aborted calibration leaves on the controller; whether a factory reset exists.
+- **Accepted risk:** what an aborted calibration leaves on the controller, and whether a
+  factory reset exists, are unknown (no capture). The cancel path mirrors the normal finish
+  and tells the user to re-run; re-calibrating is the only known remedy.
 - Meaning of the trigger reply's extra byte (`04`) and of the four trigger values.
 - Whether the final `0f` read ends calibration or only reads it (we mirror the app either way).
