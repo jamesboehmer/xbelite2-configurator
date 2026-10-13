@@ -14,7 +14,9 @@ From the TUI, without Windows, a user can:
 
 - Every new host frame matches the Xbox Accessories captures byte for byte (golden tests).
 - The calibration step detector, fed the real input stream from the capture, signals each
-  step within ±0.5 s of the buzz Xbox Accessories gave (replay test).
+  step between 0.75 s before and 0.5 s after the buzz Xbox Accessories gave (replay test).
+  The window is asymmetric because the app's buzz lags the actual six-turn point by
+  0.28–0.51 s in the capture.
 - Vibration strengths survive a write/read round trip and keep the rest of the page intact.
 
 **Out of scope:** factory-reset of calibration (no command known); per-trigger dead zones or
@@ -146,7 +148,8 @@ Pure step detector: `New(kind Kind)`; `Feed(t time.Time, a protocol.Axes) []Even
 - Stick turns: accumulate signed angle change only while radius > 85% of full scale (the
   controller records extremes, so turns that miss the rim would shrink the range); a step
   completes at |net turns| ≥ 6 in the first direction (either sign), then at 6 turns back
-  in the opposite direction (net returns to ~0).
+  in the opposite direction, counted from the farthest point reached in the first direction
+  (turning past six never counts against the user).
 - Stick pushes, in order up, right, down, left: the axis passes 80% of full scale in that
   direction, then the stick returns within 25% of centre.
 - Trigger: a pull is a rise above 60% of full scale followed by a fall below 10%; a step is
@@ -182,8 +185,8 @@ Pure step detector: `New(kind Kind)`; `Feed(t time.Time, a protocol.Axes) []Even
 - `internal/calibrate`: synthetic circles (both directions first), pushes in order, pulls,
   noise near thresholds, wrong push order not counted.
 - Replay: with `XBE2_CAL_CAPTURE` set, feed the capture's input reports per calibration window
-  into the detector; each step event must fall within ±0.5 s of the app's soft buzz (and the
-  last step before the strong buzz). Skips when unset.
+  into the detector; each step event must fall between 0.75 s before and 0.5 s after the app's
+  soft buzz. Skips when unset.
 - TUI via `device.Fake`: vibration edit → dirty → write writes bytes 28–31 in both mapping pages;
   test sends one on and one off frame; calibration end to end (demo step keys); cancel path
   sends the finishing read and INIT; quit ignored while running.
