@@ -54,7 +54,7 @@ sudo ./xbelite2-configurator -pid 0x0b22             # if your controller report
 ```
 
 Keys: `↑/↓` select · `←/→` cycle output · `enter` pick from list · `0` disable ·
-`1/2/3` profile · `tab` standard/shift · `c` profile color · `d` reset · `r` reload · `w` write · `f` firmware · `q` quit.
+`1/2/3` profile · `tab` standard/shift · `c` profile color · `v` vibration · `s` calibrate · `d` reset · `r` reload · `w` write · `f` firmware · `q` quit.
 
 Nothing changes on the controller until you press `w`. It writes all four pages of the
 current profile, the same way Xbox Accessories does, and reads them back to verify.
@@ -74,6 +74,16 @@ written. See [FIRMWARE.md](FIRMWARE.md) for the protocol.
 
 The "Held:" line shows what the controller is reporting live. Press a paddle to see
 which P number it is.
+
+## Vibration and calibration
+
+Press `v` to set the selected profile's vibration strength for each motor (left and right
+grip, left and right trigger); `t` in that panel buzzes the controller. Strengths are saved
+with `w` like the other profile settings.
+
+Press `s` to calibrate a thumbstick or trigger. Follow the steps on screen; the controller
+buzzes after each one. Let go of the stick or trigger when asked: the app waits until it is
+at rest before starting and before saving. If you stop part way, run the calibration again.
 
 ### Profile color
 

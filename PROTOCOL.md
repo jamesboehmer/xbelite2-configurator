@@ -73,6 +73,47 @@ Sent by the app while picking a color, with its own sequence counter and no ACK:
 
 The stored color is mapping-page bytes 45-48 and is written to both the standard and shift pages.
 
+## Vibration strength (mapping page bytes 28-31)
+
+| byte | motor |
+|---|---|
+| 28 | right grip |
+| 29 | left grip |
+| 30 | right trigger |
+| 31 | left trigger |
+
+0-100, stored the same in a profile's standard and shift pages. The controller scales
+rumble from the host by the active profile's saved strengths. Byte order confirmed on a
+controller by setting one byte to 100 and the others to 0.
+
+## Rumble (cmd 0x09)
+
+`09 00 s 09 00 0f <LT> <RT> <left grip> <right grip> ff 00 eb`, own sequence counter, no ACK.
+Levels 0-100; the same frame with zeros stops. Xbox Accessories' test buzz is all four at
+`0x32` for about half a second.
+
+## Calibration (cmd 0x1e)
+
+Same sequence counter as 0x4D, ACK requested. Targets: `01` left stick, `02` right stick,
+`04` left trigger, `08` right trigger.
+
+| op | host | device |
+|---|---|---|
+| `0f` read | `1e 10 s 02 0f <t>` | sticks `0f 00 <state> <t> <xmin> <xmax> <ymin> <ymax>`; triggers `0f 00 <state> <t> <b> <v0> <v1> <v2> <v3>` (u16 LE) |
+| `10` start | `1e 10 s 02 10 <t>` | `10 00 <t>` |
+
+`<state>` is `00` until a user calibration, then `10`. The controller measures the
+calibration itself. Xbox Accessories: read, start, guide the user while watching the input
+report (sticks: 6 turns each way, then push up, right, down, left; triggers: 12 full pulls
+at long, medium, and short throw), soft buzz (`0x0a`) after each step, then strong buzz
+(`0x1e`), read, INIT, two more strong buzzes. One COMMIT when done. No factory-reset command
+is known.
+
+## Raw input (cmd 0x0c)
+
+While Xbox Accessories is connected the controller also streams cmd `0x0c` frames (flags
+`0x00`) laid out like the input report, apparently before profile remapping.
+
 ## Input report (cmd 0x20)
 
 Byte 4: `0x04` Menu, `0x08` View, `0x10` A, `0x20` B, `0x40` X, `0x80` Y.
