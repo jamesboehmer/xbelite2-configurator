@@ -268,15 +268,19 @@ func ParsePacket(data []byte) (Packet, error) {
 
 func (p Packet) NeedsAck() bool { return p.Flags&FlagNeedsAck != 0 }
 
-// ReplyMatches reports whether a device 0x4D frame answers request req.
+// ReplyMatches reports whether a device frame answers request req (0x4D or 0x1e).
 // Replies carry the controller's own sequence counter, not the request's, so
-// they are matched by op code (and page, for reads and writes) instead.
+// they are matched by command, op code, and page or target instead.
 func ReplyMatches(req []byte, reply Packet) bool {
-	if len(req) < 5 || reply.Cmd != CmdConfig || len(reply.Payload) == 0 || reply.Payload[0] != req[4] {
+	if len(req) < 5 || reply.Cmd != req[0] || len(reply.Payload) == 0 || reply.Payload[0] != req[4] {
 		return false
 	}
-	switch req[4] {
-	case OpRead, OpWrite:
+	switch {
+	case req[0] == CmdConfig && (req[4] == OpRead || req[4] == OpWrite):
+		return len(req) >= 6 && len(reply.Payload) >= 3 && reply.Payload[2] == req[5]
+	case req[0] == CmdCalibration && req[4] == OpCalRead:
+		return len(req) >= 6 && len(reply.Payload) >= 4 && reply.Payload[3] == req[5]
+	case req[0] == CmdCalibration && req[4] == OpCalStart:
 		return len(req) >= 6 && len(reply.Payload) >= 3 && reply.Payload[2] == req[5]
 	}
 	return true

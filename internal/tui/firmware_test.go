@@ -51,7 +51,8 @@ func drive(t *testing.T, m Model, cmd tea.Cmd) Model {
 			t.Fatal("model never settled")
 		}
 		msg := cmd()
-		if _, ok := msg.(tickMsg); ok {
+		switch msg.(type) {
+		case tickMsg, calTickMsg:
 			return m
 		}
 		var next tea.Model
